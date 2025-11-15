@@ -11,7 +11,8 @@ type EventType = {
     name: string;
     date: string;
     time: string;
-    friends?: string;
+    friends?: string[] | string;
+    friendIds?: string[];
     details?: string;
     userId: string;
     createdAt: any;
@@ -68,12 +69,17 @@ export default function HomeScreen() {
         const today = new Date();
         const eventDate = new Date(event.date);
         const user = getAuth().currentUser;
+        const friendsList = Array.isArray(event.friends)
+            ? event.friends
+            : event.friends
+                ? event.friends.split(",").map(friend => friend.trim()).filter(Boolean)
+                : [];
 
         switch (activeTab) {
             case "Upcoming":
                 return event.userId === user?.uid && eventDate >= today;
             case "Invitings":
-                return event.userId !== user?.uid && event.friends?.includes(username);
+                return event.userId !== user?.uid && friendsList.includes(username ?? "");
             case "My Events":
                 return event.userId === user?.uid;
             default:
@@ -85,7 +91,11 @@ export default function HomeScreen() {
         <View style={styles.card}>
             <Text style={styles.eventName}>{item.name}</Text>
             <Text style={styles.eventDate}>{item.date} | {item.time}</Text>
-            {item.friends ? <Text style={styles.eventFriends}>Friends: {item.friends}</Text> : null}
+            {item.friends ? (
+                <Text style={styles.eventFriends}>
+                    Friends: {Array.isArray(item.friends) ? item.friends.join(", ") : item.friends}
+                </Text>
+            ) : null}
             {item.details ? <Text style={styles.eventDetails}>{item.details}</Text> : null}
         </View>
     );
@@ -107,7 +117,7 @@ export default function HomeScreen() {
                                     <Text style={styles.todayTitle}>Today</Text>
                                 </View>
                             </View>
-                            <Text style={styles.todayText}>You don't have any plans for today 😊</Text>
+                            <Text style={styles.todayText}>You don’t have any plans for today 😊</Text>
                         </View>
 
                         {/* Tabs */}
@@ -129,7 +139,7 @@ export default function HomeScreen() {
                 renderItem={({ item }) =>
                     item.id === 'empty' ? (
                         <View style={styles.cardEmpty}>
-                            <Text style={styles.emptyText}>You don't have any {activeTab}</Text>
+                            <Text style={styles.emptyText}>You don’t have any {activeTab}</Text>
                         </View>
                     ) : (
                         renderEvent({ item })

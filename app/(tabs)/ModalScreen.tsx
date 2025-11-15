@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
     StyleSheet,
     Text,
@@ -11,12 +11,17 @@ import {
 } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { getAuth } from "firebase/auth";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { collection, addDoc, serverTimestamp, query, where, getDocs, doc, getDoc } from "firebase/firestore";
 import { db } from "../../FirebaseConfig";
 
 type ModalScreenProps = {
     visible: boolean;
     closeModal: () => void;
+};
+
+type FriendOption = {
+    id: string;
+    username: string;
 };
 
 export default function ModalScreen({ visible, closeModal }: ModalScreenProps) {
@@ -25,8 +30,67 @@ export default function ModalScreen({ visible, closeModal }: ModalScreenProps) {
     const [time, setTime] = useState(new Date());
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [showTimePicker, setShowTimePicker] = useState(false);
-    const [friends, setFriends] = useState("");
     const [details, setDetails] = useState("");
+    const [friends, setFriends] = useState<FriendOption[]>([]);
+    const [selectedFriendIds, setSelectedFriendIds] = useState<string[]>([]);
+
+    useEffect(() => {
+        const loadFriends = async () => {
+            const auth = getAuth();
+            const currentUser = auth.currentUser;
+            if (!currentUser) return;
+
+            try {
+                const friendsQuery = query(
+                    collection(db, "friends"),
+                    where("userId", "==", currentUser.uid)
+                );
+                const snapshot = await getDocs(friendsQuery);
+                const friendOptions = await Promise.all(
+                    snapshot.docs.map(async (friendDoc) => {
+                        const data = friendDoc.data() as { friendId: string; friendUsername?: string };
+
+                        if (data.friendUsername) {
+                            return { id: data.friendId, username: data.friendUsername };
+                        }
+
+                        const friendUserDoc = await getDoc(doc(db, "usernames", data.friendId));
+                        if (!friendUserDoc.exists()) return null;
+                        const friendData = friendUserDoc.data() as { username: string };
+                        return { id: data.friendId, username: friendData.username };
+                    })
+                );
+
+                const validFriends = friendOptions.filter((friend): friend is FriendOption => friend !== null);
+                setFriends(validFriends);
+            } catch (error) {
+                console.log("Error loading friends for modal", error);
+            }
+        };
+
+        if (visible) {
+            loadFriends();
+        }
+    }, [visible]);
+
+    useEffect(() => {
+        if (!visible) {
+            setSelectedFriendIds([]);
+        }
+    }, [visible]);
+
+    const toggleFriendSelection = (friendId: string) => {
+        setSelectedFriendIds((prev) =>
+            prev.includes(friendId)
+                ? prev.filter((id) => id !== friendId)
+                : [...prev, friendId]
+        );
+    };
+
+    const selectedFriends = useMemo(
+        () => friends.filter((friend) => selectedFriendIds.includes(friend.id)),
+        [friends, selectedFriendIds]
+    );
 
     const handleSave = async () => {
         const user = getAuth().currentUser;
@@ -42,12 +106,20 @@ export default function ModalScreen({ visible, closeModal }: ModalScreenProps) {
                 name,
                 date: date.toISOString().split("T")[0], // YYYY-MM-DD
                 time: time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-                friends,
+                friends: selectedFriends.map((friend) => friend.username),
+                friendIds: selectedFriends.map((friend) => friend.id),
                 details,
                 userId: user.uid,
                 createdAt: serverTimestamp(),
             });
             alert("Подія додана!");
+            setName("");
+            setDetails("");
+            setSelectedFriendIds([]);
+            setDate(new Date());
+            setTime(new Date());
+            setShowDatePicker(false);
+            setShowTimePicker(false);
             closeModal();
         } catch (error) {
             console.log(error);
@@ -116,13 +188,36 @@ export default function ModalScreen({ visible, closeModal }: ModalScreenProps) {
                         />
                     )}
 
-                    {/* Інші поля */}
-                    <TextInput
-                        style={[styles.input, { marginTop: 10 }]}
-                        placeholder="Invite friends"
-                        value={friends}
-                        onChangeText={setFriends}
-                    />
+                    {/* Друзі */}
+                    <View style={styles.friendSection}>
+                        <Text style={styles.label}>Invite friends</Text>
+                        {friends.length === 0 ? (
+                            <Text style={styles.emptyFriendsText}>Спочатку додайте друзів на вкладці Friends</Text>
+                        ) : (
+                            <ScrollView
+                                horizontal
+                                showsHorizontalScrollIndicator={false}
+                                contentContainerStyle={styles.friendChipsWrapper}
+                            >
+                                {friends.map((friend) => {
+                                    const isSelected = selectedFriendIds.includes(friend.id);
+                                    return (
+                                        <TouchableOpacity
+                                            key={friend.id}
+                                            style={[styles.friendChip, isSelected && styles.friendChipSelected]}
+                                            onPress={() => toggleFriendSelection(friend.id)}
+                                        >
+                                            <Text
+                                                style={[styles.friendChipText, isSelected && styles.friendChipTextSelected]}
+                                            >
+                                                {friend.username}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </ScrollView>
+                        )}
+                    </View>
                     <TextInput
                         style={[styles.input, { height: 80, textAlignVertical: "top" }]}
                         placeholder="Details"
@@ -165,4 +260,29 @@ const styles = StyleSheet.create({
     saveText: { color: "#fff", textAlign: "center", fontWeight: "500" },
     closeButton: { marginTop: 10, padding: 12, backgroundColor: "#505BEB", borderRadius: 8 },
     closeText: { color: "#fff", textAlign: "center", fontWeight: "500" },
+    friendSection: { marginTop: 10, marginBottom: 8 },
+    friendChipsWrapper: { paddingVertical: 4 },
+    friendChip: {
+        paddingVertical: 8,
+        paddingHorizontal: 12,
+        borderRadius: 20,
+        borderWidth: 1,
+        borderColor: "#505BEB",
+        marginRight: 8,
+    },
+    friendChipSelected: {
+        backgroundColor: "#505BEB",
+    },
+    friendChipText: {
+        color: "#505BEB",
+        fontWeight: "500",
+    },
+    friendChipTextSelected: {
+        color: "#fff",
+    },
+    emptyFriendsText: {
+        color: "#6E7D93",
+        fontSize: 12,
+        marginTop: 4,
+    },
 });
