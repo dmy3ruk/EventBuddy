@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import {SafeAreaView, View, ScrollView, Text, TouchableOpacity, TextInput, StyleSheet,
 } from "react-native";
 
@@ -7,6 +7,59 @@ import {Image} from "expo-image";
 export default function FriendsScreen() {
     const [search, setSearch] = useState("");
     const [activeTab, setActiveTab] = useState("Search");
+
+    type FriendUser = {
+        id: string;
+        username?: string | null;
+        mutualFriends?: number | null;
+    };
+
+    const [users] = useState<FriendUser[]>([
+        { id: "1", username: "Dmitry", mutualFriends: 0 },
+        { id: "2", username: "Olivia", mutualFriends: 3 },
+        { id: "3", username: "Luna", mutualFriends: 1 },
+        { id: "4", username: null, mutualFriends: 2 },
+    ]);
+
+    const filteredUsers = useMemo(() => {
+        if (activeTab === "My friends") {
+            return users.filter((user) => user.mutualFriends && user.mutualFriends > 0);
+        }
+
+        if (!search.trim()) {
+            return users;
+        }
+
+        const lowerSearch = search.trim().toLowerCase();
+        return users.filter((user) => user.username?.toLowerCase().includes(lowerSearch));
+    }, [users, search, activeTab]);
+
+    const renderFriendCard = (user: FriendUser) => {
+        const firstChar = user.username?.trim()?.charAt(0)?.toUpperCase();
+        const initials = firstChar && firstChar.length > 0 ? firstChar : "?";
+        const displayName = user.username?.trim() || "Unknown user";
+        const mutualFriendsLabel = typeof user.mutualFriends === "number"
+            ? `${user.mutualFriends} mutual friend${user.mutualFriends === 1 ? "" : "s"}`
+            : "No mutual friends";
+
+        return (
+            <View key={user.id} style={styles.friendCard}>
+                <View style={{flexDirection:'row'}}>
+                    <TouchableOpacity style={styles.avatar} onPress={() => alert("Pressed!")}>
+                        <Text style={styles.avatarText}>{initials}</Text>
+                    </TouchableOpacity>
+                    <View style={{flexDirection:'column', gap:4}}>
+                        <Text style={styles.friendName}>{displayName}</Text>
+                        <Text style={styles.subText}>{mutualFriendsLabel}</Text>
+                    </View>
+                </View>
+
+                <TouchableOpacity style={styles.AddFriendBtn}>
+                    <Text style={{color:"white"}}>Add Friend</Text>
+                </TouchableOpacity>
+            </View>
+        );
+    };
 
 
     return (
@@ -61,25 +114,12 @@ export default function FriendsScreen() {
                     />
                 </View>
 
-                {/* people acc list */}
-
-                {/*<View style={styles.friendsList}>*/}
-                {/*    <View style={styles.friendCard}>*/}
-                {/*        <View style={{flexDirection:'row'}}>*/}
-                {/*            <TouchableOpacity style={styles.avatar} onPress={() => alert("Pressed!")}>*/}
-                {/*                <Text style={styles.avatarText}>D</Text>*/}
-                {/*            </TouchableOpacity>*/}
-                {/*            <View style={{flexDirection:'column', gap:4}}>*/}
-                {/*                <Text style={styles.friendName}>Dmitry</Text>*/}
-                {/*                <Text style={styles.subText}>0 mutual friends</Text>*/}
-                {/*            </View>*/}
-                {/*        </View>*/}
-
-                {/*        <TouchableOpacity style={styles.AddFriendBtn}>*/}
-                {/*            <Text style={{color:"white"}}>Add Friend</Text>*/}
-                {/*        </TouchableOpacity>*/}
-                {/*    </View>*/}
-                {/*</View>*/}
+                <View style={styles.friendsList}>
+                    {filteredUsers.map(renderFriendCard)}
+                    {filteredUsers.length === 0 ? (
+                        <Text style={styles.emptyState}>No friends found</Text>
+                    ) : null}
+                </View>
 
             </ScrollView>
         </SafeAreaView>
@@ -190,6 +230,12 @@ const styles = StyleSheet.create({
     friendsList: {
         marginHorizontal: 16,
         marginBottom: 40,
+    },
+    emptyState: {
+        textAlign: "center",
+        color: "#6E7D93",
+        fontSize: 14,
+        marginTop: 20,
     },
     friendCard: {
         justifyContent: "space-between",
