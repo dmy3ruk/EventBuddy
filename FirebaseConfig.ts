@@ -1,15 +1,15 @@
-// Import the functions you need from the SDKs you need
-import { initializeApp } from "firebase/app";
-import { initializeAuth, getReactNativePersistence } from "firebase/auth";
-import { getAnalytics } from "firebase/analytics";
-import {getFirestore} from "@firebase/firestore";
-import ReactNativeAsyncStorage from '@react-native-async-storage/async-storage';
-import AsyncStorage from "@react-native-async-storage/async-storage";
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
+// FirebaseConfig.ts
 
-// Your web app's Firebase configuration
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+import { initializeApp, getApps, getApp } from "firebase/app";
+import {
+    initializeAuth,
+    getReactNativePersistence,
+    getAuth,
+    Auth,
+} from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
 const firebaseConfig = {
     apiKey: "AIzaSyCRZPLbe1Fjvr2Hg3yBLx-LEdKE26MvdGU",
     authDomain: "eventbuddy-81cbc.firebaseapp.com",
@@ -17,11 +17,27 @@ const firebaseConfig = {
     storageBucket: "eventbuddy-81cbc.firebasestorage.app",
     messagingSenderId: "836562128145",
     appId: "1:836562128145:web:bcbe8ebd6197da7a75d0b0",
-    measurementId: "G-MELT46KQFD"
+    measurementId: "G-MELT46KQFD",
 };
 
-// Initialize Firebase
-export const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
-export const db =getFirestore(app)
-export const auth = initializeAuth(app, {   persistence: getReactNativePersistence(AsyncStorage) });
+let app;
+let auth: Auth;
+
+// ✅ Якщо ще немає жодного ініціалізованого Firebase app — ініціалізую
+if (getApps().length === 0) {
+    app = initializeApp(firebaseConfig);
+
+    // І тут же один раз ініціалізую Auth з persistence для React Native
+    auth = initializeAuth(app, {
+        persistence: getReactNativePersistence(AsyncStorage),
+    });
+} else {
+    // ♻️ Якщо app вже створений — просто беру існуючий
+    app = getApp();
+    // А Auth — через getAuth, без повторного initializeAuth
+    auth = getAuth(app);
+}
+
+const db = getFirestore(app);
+
+export { app, db, auth };
