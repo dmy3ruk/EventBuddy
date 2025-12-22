@@ -13,7 +13,8 @@ import FriendsScreen from "./Friends";
 import ChatScreen from "./ChatScreen";
 import ChatsListScreen from "./ChatsListScreen";
 
-import { auth } from "../../FirebaseConfig"; // перевір шлях під себе
+import { auth } from "../../FirebaseConfig";
+import PublicEventsScreen from "./PublicEventsScreen";
 
 const Tab = createBottomTabNavigator();
 
@@ -53,6 +54,7 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
                 if (route.name === "Calendar") iconSource = require("../../assets/images/Calender 2.svg");
                 if (route.name === "Profile") iconSource = require("../../assets/images/Profile Circle.svg");
                 if (route.name === "Friends") iconSource = require("../../assets/images/search.svg");
+                if (route.name === "Public Events") iconSource = require("../../assets/images/people.svg");
 
                 return (
                     <TouchableOpacity
@@ -94,6 +96,7 @@ export default function TabLayout() {
                 <Tab.Screen name="Friends" component={FriendsScreen} />
                 <Tab.Screen name="Calendar" component={CalendarScreen} />
                 <Tab.Screen name="Profile" component={ProfileScreen} />
+                <Tab.Screen name="Public Events" component={PublicEventsScreen} />
 
                 {/* приховані з таббару екрани */}
                 <Tab.Screen

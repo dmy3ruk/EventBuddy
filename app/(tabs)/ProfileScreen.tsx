@@ -12,6 +12,7 @@ import {
     subscribeToInvitedEvents,
     calculateProfileStats,
 } from "../../utils/firestoreHelpers";
+import { ScrollView } from "react-native";
 
 type EventType = {
     id: string;
@@ -97,298 +98,320 @@ export default function ProfileScreen() {
     };
 
     return (
-        <View style={styles.container}>
-            {/* кнопка налаштувань */}
-            <View
-                style={{
-                    backgroundColor: "#fff",
-                    width: 40,
-                    height: 40,
-                    borderRadius: 8,
-                    borderWidth: 0.5,
-                    borderColor: "#E5E7EB",
-                    justifyContent: "center",
-                    alignItems: "center",
-                    position: "absolute",
-                    right: 15,
-                    top: 60,
-                }}
-            >
-                <TouchableOpacity onPress={() => setModalVisible(true)}>
+        <ScrollView
+            style={styles.container}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+        >
+
+
+        {/* Profile Card */}
+            <View style={styles.profileCard}>
+                <View style={styles.avatarWrapper}>
+                    <View style={styles.avatar}>
+                        <Text style={styles.avatarText}>
+                            {username ? username[0]?.toUpperCase() : "A"}
+                        </Text>
+                    </View>
+
+                    <TouchableOpacity style={styles.editIcon}>
+                        <Ionicons name="pencil" size={14} color="#fff" />
+                    </TouchableOpacity>
+                </View>
+
+                <View style={styles.description}>
+                    <Text style={styles.name}>{username}</Text>
+                    <Text style={styles.email}>{username}@email.com</Text>
+                </View>
+            </View>
+
+            {/* Statistics */}
+            <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Statistics</Text>
+                <View style={styles.statsGrid}>
+                    <View style={styles.statItem}>
+                        <Text style={styles.statNumber}>{ownerEvents.length}</Text>
+                        <Text style={styles.statLabel}>Events Created</Text>
+                    </View>
+                    <View style={styles.statItem}>
+                        <Text style={styles.statNumber}>{totalAttendees}</Text>
+                        <Text style={styles.statLabel}>Events Attended</Text>
+                    </View>
+                    <View style={styles.statItem}>
+                        <Text style={styles.statNumber}>156</Text>
+                        <Text style={styles.statLabel}>Friends Connected</Text>
+                    </View>
+                    <View style={styles.statItem}>
+                        <Text style={styles.statNumber}>{upcomingCount}</Text>
+                        <Text style={styles.statLabel}>Upcoming Events</Text>
+                    </View>
+                </View>
+            </View>
+
+            {/* Account Settings */}
+            <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Account Settings</Text>
+
+                <View style={styles.settingsItem}>
                     <Image
-                        source={require("../../assets/images/Setting.svg")}
-                        style={{
-                            width: 24,
-                            height: 24,
-                        }}
+                        source={require("../../assets/images/notif.svg")}
+                        style={{ width: 40, height: 40, marginRight:8 }}
+                        contentFit="contain"
                     />
+                    <View style={styles.settingsText}>
+                        <Text style={styles.settingsTitle}>Notifications</Text>
+                        <Text style={styles.settingsSub}>Manage your notification preferences</Text>
+                    </View>
+                    <Text style={styles.link}>Configure</Text>
+                </View>
+
+                <View style={styles.settingsItem}>
+                    <Image
+                        source={require("../../assets/images/settings.svg")}
+                        style={{ width: 40, height: 40, marginRight:8 }}
+                        contentFit="contain"
+                    />
+                    <View style={styles.settingsText}>
+                        <Text style={styles.settingsTitle}>Privacy Settings</Text>
+                        <Text style={styles.settingsSub}>Control who can see your profile</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color="#999" />
+                </View>
+
+                <View style={styles.settingsItem}>
+                    <Image
+                        source={require("../../assets/images/verification.svg")}
+                        style={{ width: 40, height: 40, marginRight:8 }}
+                        contentFit="contain"
+                    />
+                    <View style={styles.settingsText}>
+                        <Text style={styles.settingsTitle}>Account Verification</Text>
+                        <Text style={styles.settingsSub}>Verify your account for added security</Text>
+                    </View>
+                    <View style={styles.verifiedBadge}>
+                        <Text style={styles.verifiedText}>Verified</Text>
+                    </View>
+                </View>
+
+                <TouchableOpacity style={[styles.settingsItem, { marginBottom: 12 }]} onPress={handleLogout}>
+                    <Image
+                        source={require("../../assets/images/signout.png")}
+                        style={{ width: 40, height: 40, marginRight:8 }}
+                        contentFit="contain"
+                    />
+                    <View style={styles.settingsText}>
+                        <Text style={[styles.settingsTitle, { color: "#EF4444" }]}>
+                            Sign Out
+                        </Text>
+                        <Text style={styles.settingsSub}>Sign out of your account</Text>
+                </View>
+
                 </TouchableOpacity>
             </View>
 
-            {/* Modal Screen */}
-            <Modal
-                animationType="slide"
-                transparent={true}
-                visible={modalVisible}
-                onRequestClose={() => setModalVisible(false)}
-            >
-                <View style={styles.modalOverlay}>
-                    <View style={styles.modalContent}>
-                        <TouchableOpacity
-                            style={[styles.closeBtn, { marginBottom: 12 }]}
-                            onPress={handleLogout}
-                        >
-                            <Text style={{ color: "#fff" }}>Log Out</Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                            style={styles.closeBtn}
-                            onPress={() => setModalVisible(false)}
-                        >
-                            <Text style={{ color: "#fff" }}>Закрити</Text>
-                        </TouchableOpacity>
-                    </View>
-                </View>
-            </Modal>
-
-            {/* Profile */}
-            <View style={styles.header}>
-                <View style={styles.avatar}>
-                    <Text style={styles.avatarText}>
-                        {username ? username[0]?.toUpperCase() : "A"}
-                    </Text>
-                </View>
-                <Text style={styles.username}>{username}</Text>
-                <Text style={styles.handle}>@{username}</Text>
-            </View>
-
-            {/* Cards */}
-            <View style={styles.cards}>
-                <View style={styles.card}>
-                    <View style={styles.cardName}>
-                        <Image
-                            source={require("../../assets/images/arrow.svg")}
-                            style={{ width: 40, height: 40 }}
-                        />
-                        <Text style={styles.cardTitle}>Upcoming Events</Text>
-                    </View>
-                    <Text style={styles.cardNumber}>{upcomingCount}</Text>
-                    <Text style={styles.cardSub}>Events this month</Text>
-                </View>
-
-                <View style={styles.card}>
-                    <View style={styles.cardName}>
-                        <Image
-                            source={require("../../assets/images/mail.svg")}
-                            style={{ width: 40, height: 40 }}
-                        />
-                        <Text style={styles.cardTitle}>Pending Invites</Text>
-                    </View>
-                    <Text style={styles.cardNumber}>{pendingInvitesCount}</Text>
-                    <Text style={styles.cardSub}>Awaiting response</Text>
-                </View>
-
-                <View style={[styles.card, styles.cardFull]}>
-                    <View style={styles.cardName}>
-                        <Image
-                            source={require("../../assets/images/group.svg")}
-                            style={{ width: 40, height: 40 }}
-                        />
-                        <Text style={styles.cardTitle}>Total Attendees</Text>
-                    </View>
-                    <Text style={styles.cardNumber}>{totalAttendees}</Text>
-                    <Text style={styles.cardSub}>Across all events</Text>
-                </View>
-            </View>
-
-            {/* List */}
-            <View style={styles.list}>
-                <TouchableOpacity
-                    style={styles.listItem}
-                    onPress={() => {
-                        // router.push("/LastEvents");
-                    }}
-                >
-                    <View
-                        style={{
-                            flexDirection: "row",
-                            alignItems: "center",
-                            gap: 8,
-                        }}
-                    >
-                        <Image
-                            source={require("../../assets/images/time.svg")}
-                            style={{ width: 24, height: 24 }}
-                        />
-                        <Text style={styles.listText}>Last events</Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={20} color="#999" />
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                    style={styles.listItem}
-                    onPress={() => {
-                        // router.push("/CreatedByMe");
-                    }}
-                >
-                    <View
-                        style={{
-                            flexDirection: "row",
-                            alignItems: "center",
-                            gap: 8,
-                        }}
-                    >
-                        <Image
-                            source={require("../../assets/images/Award 3.svg")}
-                            style={{ width: 24, height: 24 }}
-                        />
-                        <Text style={styles.listText}>Created by me</Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={20} color="#999" />
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                    style={styles.listItem}
-                    onPress={() => {
-                        // router.push("/Participant");
-                    }}
-                >
-                    <View
-                        style={{
-                            flexDirection: "row",
-                            alignItems: "center",
-                            gap: 8,
-                        }}
-                    >
-                        <Image
-                            source={require("../../assets/images/Group 1.svg")}
-                            style={{ width: 24, height: 24 }}
-                        />
-                        <Text style={styles.listText}>Participant</Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={20} color="#999" />
-                </TouchableOpacity>
-            </View>
-        </View>
+            <Text style={styles.memberSince}>Member since March 2023</Text>
+        </ScrollView>
     );
-}
 
+}
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: "#F9F9F9",
+        backgroundColor: "#F5F6FA",
+    },
+
+    scrollContent: {
+        alignItems: "center",
+        paddingBottom: 40,
+    },
+
+    /* ===== PROFILE CARD ===== */
+    profileCard: {
+        marginTop:80,
+        marginBottom: 0,
+        width: "95%",
+        borderRadius: 20,
+        paddingVertical: 8,
+        paddingHorizontal: 20,
         alignItems: "center",
     },
-    header: {
-        alignItems: "center",
-        marginTop: 40,
+
+    avatarWrapper: {
+        position: "relative",
+        marginBottom: 12,
+        borderRadius: 60, // коло
+        borderWidth: 4,
+        borderColor: "#FFFFFF",
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+
+        // shadow (Android)
+        elevation: 4,
+    },
+
+    description:{
+        width: "50%",
+        paddingVertical:8,
+        alignItems:"center",
+        backgroundColor: "#FFFFFF",
+        borderRadius: 16,
+        borderColor: "#E2E8F0",
+        borderWidth:1,
+        marginBottom:0
     },
     avatar: {
-        marginTop: 50,
         width: 96,
         height: 96,
         borderRadius: 48,
-        backgroundColor: "#EB7C50",
+        backgroundColor: "#4CAF50",
         justifyContent: "center",
         alignItems: "center",
     },
+
     avatarText: {
-        color: "#fff",
-        fontSize: 36,
-        fontWeight: "600",
+        fontSize: 32,
+        fontWeight: "700",
+        color: "#FFFFFF",
     },
-    username: {
-        marginTop: 12,
+
+    editIcon: {
+        position: "absolute",
+        right: 0,
+        bottom: 0,
+        backgroundColor: "#4F46E5",
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        justifyContent: "center",
+        alignItems: "center",
+    },
+
+    name: {
         fontSize: 20,
         fontWeight: "600",
-        color: "#000",
+        color: "#111827",
+        marginTop: 6,
     },
-    handle: {
+
+    email: {
         fontSize: 14,
-        color: "#666",
+        color: "#6B7280",
+        marginTop: 4,
     },
-    cards: {
+
+    location: {
+        fontSize: 13,
+        color: "#9CA3AF",
+        marginTop: 2,
+    },
+
+    bio: {
+        marginTop: 12,
+        fontSize: 14,
+        color: "#6B7280",
+        textAlign: "center",
+        lineHeight: 20,
+    },
+
+    /* ===== SECTIONS ===== */
+    section: {
+        width: "95%",
+        marginTop: 12,
+        backgroundColor: "#FFFFFF",
+        borderRadius: 16,
+        borderColor: "#E2E8F0",
+        borderWidth:1
+    },
+
+    sectionTitle: {
+        fontSize: 18,
+        fontWeight: "600",
+        color: "#111827",
+        marginLeft:20,
+        marginTop:25,
+        marginBottom:8,
+    },
+
+    /* ===== STATISTICS ===== */
+    statsGrid: {
+        backgroundColor: "#FFFFFF",
+        borderRadius: 16,
         flexDirection: "row",
         flexWrap: "wrap",
-        justifyContent: "space-between",
-        width: "90%",
-        marginTop: 24,
-        gap: 4,
+        paddingVertical: 16,
     },
-    card: {
-        backgroundColor: "#fff",
-        borderWidth: 1,
-        borderColor: "#E2E8F0",
-        borderRadius: 16,
-        padding: 16,
-        width: "49%",
-        height: "auto",
+
+    statItem: {
+        width: "50%",
         alignItems: "center",
-        marginBottom: 4,
+        marginVertical: 12,
     },
-    cardFull: {
-        width: "100%",
-    },
-    cardTitle: {
-        fontSize: 16,
-        fontWeight: "600",
-        marginBottom: 4,
-        color: "black",
-        flexShrink: 1,
-    },
-    cardNumber: {
-        fontSize: 24,
+
+    statNumber: {
+        fontSize: 22,
         fontWeight: "700",
-        color: "#000",
+        color: "#4F46E5",
     },
-    cardSub: {
-        fontSize: 12,
-        color: "#666",
+
+    statLabel: {
+        marginTop: 4,
+        fontSize: 13,
+        color: "#6B7280",
     },
-    list: {
-        marginTop: 24,
-        width: "90%",
-    },
-    listItem: {
-        backgroundColor: "#fff",
-        borderRadius: 8,
-        borderWidth: 1,
-        borderColor: "#E5E7EB",
-        paddingVertical: 12,
-        paddingHorizontal: 12,
-        marginBottom: 8,
-        flexDirection: "row",
-        justifyContent: "space-between",
-        alignItems: "center",
-    },
-    listText: {
-        fontSize: 16,
-        color: "#000",
-    },
-    cardName: {
-        width: "100%",
+
+    /* ===== ACCOUNT SETTINGS ===== */
+    settingsItem: {
         flexDirection: "row",
         alignItems: "center",
-        gap: 10,
-        marginBottom: 16,
+        backgroundColor: "#FFFFFF",
+        borderRadius: 12,
+        paddingVertical: 14,
+        paddingHorizontal: 14,
+        marginBottom: 0,
     },
-    modalOverlay: {
+
+    settingsText: {
         flex: 1,
-        backgroundColor: "rgba(0,0,0,0.5)",
-        justifyContent: "center",
-        alignItems: "center",
+        marginLeft: 12,
     },
-    modalContent: {
-        width: "80%",
-        backgroundColor: "#fff",
-        borderRadius: 16,
-        padding: 20,
-        alignItems: "center",
+
+    settingsTitle: {
+        fontSize: 15,
+        fontWeight: "500",
+        color: "#111827",
     },
-    closeBtn: {
-        backgroundColor: "#505AEB",
-        paddingVertical: 10,
-        paddingHorizontal: 20,
-        borderRadius: 8,
+
+    settingsSub: {
+        fontSize: 12,
+        color: "#6B7280",
+        marginTop: 2,
+    },
+
+    link: {
+        fontSize: 13,
+        fontWeight: "500",
+        color: "#4F46E5",
+    },
+
+    verifiedBadge: {
+        backgroundColor: "#22C55E",
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 999,
+    },
+
+    verifiedText: {
+        color: "#FFFFFF",
+        fontSize: 12,
+        fontWeight: "500",
+    },
+
+    /* ===== MEMBER SINCE ===== */
+    memberSince: {
+        marginTop: 14,
+        fontSize: 12,
+        color: "#9CA3AF",
     },
 });
