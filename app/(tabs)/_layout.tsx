@@ -8,7 +8,6 @@ import { router } from "expo-router";
 import HomeScreen from "./HomeScreen";
 import ProfileScreen from "./ProfileScreen";
 import CalendarScreen from "./CalendarScreen";
-import ModalScreen from "./ModalScreen";
 import FriendsScreen from "./Friends";
 import ChatScreen from "./ChatScreen";
 import ChatsListScreen from "./ChatsListScreen";

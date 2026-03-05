@@ -1,13 +1,22 @@
-export type EventType = {
-    id: string;
+export type EventLocation = {
+    latitude: number;
+    longitude: number;
+};
+
+// Базовий інтерфейс 
+export interface EventType {
     name: string;
     date: string;
     time: string;
-    friends?: string;
-    details?: string;
     userId: string;
-    createdAt: any;
-    invitedUserIds?: string[];
+    isPublic: boolean;
+    category: string; 
+    details?: string;
     acceptedUserIds?: string[];
-    location: undefined,
-};
+    location?: EventLocation;
+}
+
+// Тип для роботи в додатку (дані + ID)
+export interface EventFull extends EventType {
+    id: string;
+}

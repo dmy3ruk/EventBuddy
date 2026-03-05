@@ -1,53 +1,34 @@
 import React, { useEffect, useMemo, useState } from "react";
-import {
-    View,
-    Text,
-    StyleSheet,
-    FlatList,
-    TouchableOpacity,
-    ScrollView,
+import { 
+    View, Text, StyleSheet, FlatList, TouchableOpacity, 
+    ScrollView, Alert, Linking, Platform, SafeAreaView, StatusBar 
 } from "react-native";
-import {
-    collection,
-    onSnapshot,
-    query,
-    where,
-    orderBy,
-    updateDoc,
-    doc,
-    arrayUnion,
-    arrayRemove,
-} from "firebase/firestore";
+import * as Haptics from 'expo-haptics';
+import { collection, onSnapshot, query, where, orderBy, updateDoc, doc, arrayUnion, arrayRemove } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 import { db } from "../../FirebaseConfig";
-import {data} from "browserslist";
+import { EVENT_CATEGORIES } from "../../utils/categories";
+import { EventFull } from "../../utils/types";
 
-/* ================= TYPES ================= */
-type EventData = {
-    name: string;
-    date: string;
-    time: string;
-    details?: string;
-    category?: string;
-    isPublic: boolean;
-    userId: string;
-    acceptedUserIds?: string[];
-    maxAttendees?: number;
-};
+// --- Chip Component (Material 3 Style) ---
+const CategoryChip = ({ label, isActive, onPress }: { label: string, isActive: boolean, onPress: () => void }) => (
+    <TouchableOpacity
+        activeOpacity={0.7}
+        onPress={() => {
+            if (Platform.OS === 'ios') Haptics.selectionAsync();
+            onPress();
+        }}
+        style={[styles.chip, isActive && styles.chipActive]}
+    >
+        <Text style={[styles.chipText, isActive && styles.chipTextActive]}>
+            {label === "All" ? "🌐 " : ""}{label}
+        </Text>
+    </TouchableOpacity>
+);
 
-type EventItem = EventData & {
-    id: string;
-};
-
-
-/* ================= CATEGORIES ================= */
-const CATEGORIES = ["All", "networking", "outdoor", "creative", "social", "wellness"];
-
-/* ================= SCREEN ================= */
 export default function PublicEventsScreen() {
-    const [events, setEvents] = useState<EventItem[]>([]);
+    const [events, setEvents] = useState<EventFull[]>([]);
     const [activeCategory, setActiveCategory] = useState("All");
-    const today = new Date();
     const uid = getAuth().currentUser?.uid;
 
     useEffect(() => {
@@ -56,292 +37,221 @@ export default function PublicEventsScreen() {
             where("isPublic", "==", true),
             orderBy("date", "asc")
         );
-
-        const unsub = onSnapshot(q, (snap) => {
-            const list: EventItem[] = snap.docs.map((d) => ({
-                id: d.id,
-                ...(d.data() as EventData),
-            }));
-
+        return onSnapshot(q, (snap) => {
+            const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as EventFull));
             setEvents(list);
         });
-
-        return unsub;
     }, []);
 
     const filteredEvents = useMemo(() => {
-        let list = events;
-
-        // ❌ не показуємо свої івенти
-        if (uid) {
-            list = list.filter((e) => e.userId !== uid);
-        }
-        list = list.filter((e) => {
-            const eventDate = new Date(`${e.date}T${e.time}`);
-            return eventDate >= today;
+        const todayStr = new Date().toLocaleDateString('sv-SE'); 
+        return events.filter(e => {
+            if (e.date < todayStr) return false;
+            if (activeCategory !== "All" && e.category !== activeCategory) return false;
+            return true;
         });
-        // 🎯 фільтр по категорії
-        if (activeCategory !== "All") {
-            list = list.filter((e) => e.category === activeCategory);
-        }
-
-        return list;
-    }, [events, activeCategory, uid]);
+    }, [events, activeCategory]);
 
     return (
-        <View style={styles.container}>
-            <Text style={styles.title}>Discover Events</Text>
-            <Text style={styles.subtitle}>
-                Find and join amazing events happening around you
-            </Text>
+        <SafeAreaView style={styles.safeArea}>
+            <StatusBar barStyle="dark-content" />
+            <View style={styles.container}>
+                <View style={styles.header}>
+                    <Text style={styles.title}>Discover</Text>
+                    <Text style={styles.subtitle}>Events near you</Text>
+                </View>
+                
+                <View style={styles.filterSection}>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsContent}>
+                        {["All", ...EVENT_CATEGORIES].map((cat) => (
+                            <CategoryChip 
+                                key={cat} 
+                                label={cat} 
+                                isActive={activeCategory === cat} 
+                                onPress={() => setActiveCategory(cat)} 
+                            />
+                        ))}
+                    </ScrollView>
+                </View>
 
-            {/* CATEGORY FILTER */}
-            <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={styles.chipsContainer}
-                contentContainerStyle={styles.chipsContent}
-            >
-                {CATEGORIES.map((cat) => (
-                    <TouchableOpacity
-                        key={cat}
-                        style={[
-                            styles.chip,
-                            activeCategory === cat && styles.chipActive,
-                        ]}
-                        onPress={() => setActiveCategory(cat)}
-                        activeOpacity={0.8}
-                    >
-                        <Text
-                            style={[
-                                styles.chipText,
-                                activeCategory === cat && styles.chipTextActive,
-                            ]}
-                        >
-                            {cat}
-                        </Text>
-                    </TouchableOpacity>
-                ))}
-            </ScrollView>
-
-            <FlatList
-                data={filteredEvents}
-                keyExtractor={(item) => item.id}
-                renderItem={({ item }) => (
-                    <EventCard event={item} uid={uid} />
-                )}
-                showsVerticalScrollIndicator={false}
-                ListEmptyComponent={
-                    <Text style={styles.empty}>
-                        No public events right now ✨
-                    </Text>
-                }
-            />
-        </View>
+                <FlatList
+                    data={filteredEvents}
+                    keyExtractor={(item) => item.id}
+                    renderItem={({ item }) => <EventCard event={item} uid={uid} />}
+                    contentContainerStyle={styles.listContent}
+                    showsVerticalScrollIndicator={false}
+                    ListEmptyComponent={
+                        <View style={styles.emptyContainer}>
+                            <Text style={styles.emptyEmoji}>🕵️‍♂️</Text>
+                            <Text style={styles.emptyText}>No upcoming events found</Text>
+                        </View>
+                    }
+                />
+            </View>
+        </SafeAreaView>
     );
 }
 
-/* ================= EVENT CARD ================= */
-function EventCard({
-                       event,
-                       uid,
-                   }: {
-    event: EventItem;
-    uid?: string;
-}) {
+function EventCard({ event, uid }: { event: EventFull; uid?: string }) {
+    const isOwner = event.userId === uid;
     const joined = event.acceptedUserIds?.includes(uid || "");
-    const going = event.acceptedUserIds?.length || 0;
-    const limit = event.maxAttendees;
+    const goingCount = event.acceptedUserIds?.length || 0;
 
     const toggleJoin = async () => {
         if (!uid) return;
-
+        if (Platform.OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        
         const ref = doc(db, "events", event.id);
-
-        if (joined) {
+        try {
             await updateDoc(ref, {
-                acceptedUserIds: arrayRemove(uid),
+                acceptedUserIds: joined ? arrayRemove(uid) : arrayUnion(uid),
             });
-        } else {
-            if (limit && going >= limit) return;
-            await updateDoc(ref, {
-                acceptedUserIds: arrayUnion(uid),
-            });
+        } catch (e) {
+            Alert.alert("Error", "Could not update status");
         }
     };
 
+    const headerBg = categoryColor(event.category);
+
     return (
-        <View style={styles.card}>
-            <View style={[styles.cardHeader, categoryColor(event.category)]}>
-                <Text style={styles.cardHeaderText}>{event.name}</Text>
-
-                {event.category && (
-                    <View style={styles.badge}>
-                        <Text style={styles.badgeText}>{event.category}</Text>
+        <View style={styles.shadowWrapper}>
+            <View style={styles.card}>
+                <View style={[styles.cardHeader, { backgroundColor: headerBg }]}>
+                    <View style={styles.headerTopRow}>
+                        <Text style={styles.cardTitle} numberOfLines={1}>{event.name}</Text>
+                        <View style={styles.badge}>
+                            <Text style={styles.badgeText}>{event.category}</Text>
+                        </View>
                     </View>
-                )}
-            </View>
+                </View>
 
-            <View style={styles.cardBody}>
-                {!!event.details && (
-                    <Text style={styles.cardDesc}>{event.details}</Text>
-                )}
+                <View style={styles.cardBody}>
+                    {!!event.details && <Text style={styles.cardDesc} numberOfLines={3}>{event.details}</Text>}
+                    
+                    <View style={styles.metaContainer}>
+                        <Text style={styles.metaText}>📅 {event.date} • {event.time}</Text>
+                        <Text style={styles.metaText}>👥 {goingCount} attending</Text>
+                    </View>
+                    
+                    {event.location && typeof event.location === 'object' && (
+                        <TouchableOpacity 
+                            style={styles.locationContainer} 
+                            onPress={() => openMap(event.location!.latitude, event.location!.longitude, event.name)}
+                        >
+                            <Text style={styles.locationLink}>📍 View on Map</Text>
+                        </TouchableOpacity>
+                    )}
 
-                <Text style={styles.meta}>
-                    📅 {event.date} at {event.time}
-                </Text>
-
-                <Text style={styles.meta}>
-                    👥 {going}
-                    {limit ? ` / ${limit}` : ""} going
-                </Text>
-
-                <TouchableOpacity
-                    style={[
-                        styles.actionBtn,
-                        joined ? styles.leaveBtn : styles.joinBtn,
-                    ]}
-                    onPress={toggleJoin}
-                >
-                    <Text
-                        style={[
-                            styles.actionText,
-                            joined && { color: "#4B5563" },
-                        ]}
-                    >
-                        {joined ? "Leave Event" : "Join Event"}
-                    </Text>
-                </TouchableOpacity>
+                    {isOwner ? (
+                        <View style={styles.ownerBox}>
+                            <Text style={styles.ownerText}>You are the organizer</Text>
+                        </View>
+                    ) : (
+                        <TouchableOpacity 
+                            activeOpacity={0.8}
+                            style={[styles.btn, joined ? styles.btnJoined : { backgroundColor: headerBg }]} 
+                            onPress={toggleJoin}
+                        >
+                            <Text style={[styles.btnText, joined && { color: "#4B5563" }]}>
+                                {joined ? "Leave Event" : "Join Event"}
+                            </Text>
+                        </TouchableOpacity>
+                    )}
+                </View>
             </View>
         </View>
     );
 }
 
-/* ================= HELPERS ================= */
+// --- Helpers ---
+
 function categoryColor(category?: string) {
-    switch (category) {
-        case "networking":
-            return { backgroundColor: "#4F8F6F" };
-        case "outdoor":
-            return { backgroundColor: "#4F63E6" };
-        case "creative":
-            return { backgroundColor: "#F08A5D" };
-        case "social":
-            return { backgroundColor: "#E0C12C" };
-        case "wellness":
-            return { backgroundColor: "#5A67D8" };
-        default:
-            return { backgroundColor: "#6B7280" };
-    }
+    const cat = category?.toLowerCase() || "";
+    if (cat.includes("sport"))  return "#059669"; 
+    if (cat.includes("music"))  return "#7C3AED"; 
+    if (cat.includes("food") || cat.includes("drink")) return "#D97706"; 
+    if (cat.includes("study") || cat.includes("work")) return "#4F46E5"; 
+    if (cat.includes("movie"))  return "#E11D48"; 
+    if (cat.includes("party"))  return "#C026D3"; 
+    if (cat.includes("games"))  return "#0891B2"; 
+    if (cat.includes("coffee")) return "#78350F"; 
+    return "#64748B"; 
 }
 
-/* ================= STYLES ================= */
+const openMap = (lat: number, lng: number, label: string) => {
+    const scheme = Platform.select({ ios: 'maps:0,0?q=', android: 'geo:0,0?q=' });
+    const url = Platform.select({
+        ios: `${scheme}${label}@${lat},${lng}`,
+        android: `${scheme}${lat},${lng}(${label})`
+    });
+    if (url) Linking.openURL(url);
+};
+
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: "#F9FAFB",
-        padding: 16,
-    },
-    title: {
-        marginTop:45,
-        fontSize: 24,
-        fontWeight: "700",
-        color: "#111827",
-    },
-    subtitle: {
-        color: "#6B7280",
-        marginTop: 4,
-    },
+    safeArea: { flex: 1, backgroundColor: "#FFFFFF" },
+    container: { flex: 1, backgroundColor: "#F9FAFB" },
+    header: { paddingHorizontal: 20, paddingTop: 10, marginBottom: 10 },
+    title: { fontSize: 34, fontWeight: "800", color: "#111827", letterSpacing: -0.8 },
+    subtitle: { fontSize: 16, color: "#6B7280", marginTop: -4 },
+    
+    filterSection: { height: 80, marginVertical: 10 },
+    chipsContent: { paddingHorizontal: 20, alignItems: 'center' },
+    chip: { paddingHorizontal: 16, height: 36, borderRadius: 18, backgroundColor: "#E5E7EB", marginTop: 20, marginRight: 8, marginBottom:60, justifyContent: "center" },
+    chipActive: { backgroundColor: "#111827" },
+    chipText: { fontSize: 13, fontWeight: "600", color: "#4B5563" },
+    chipTextActive: { color: "#FFF" },
 
-    chipsContainer: {
-        marginTop: 12,
-        marginBottom: 8,
-        maxHeight: 44,
+    listContent: { paddingHorizontal: 16, paddingBottom: 30 },
+    
+    // Новий контейнер для тіні
+    shadowWrapper: {
+        marginBottom: 20,
+        backgroundColor: 'transparent',
+        ...Platform.select({
+            ios: {
+                shadowColor: "#000",
+                shadowOffset: { width: 0, height: 6 },
+                shadowOpacity: 0.15,
+                shadowRadius: 10,
+            },
+            android: {
+                elevation: 6,
+            }
+        })
     },
-    chipsContent: {
-        alignItems: "center",
+    card: { 
+        backgroundColor: "#FFF", 
+        borderRadius: 24, 
+        overflow: "hidden", // Тепер безпечно обрізає лише нутрощі
     },
-    chip: {
-        height: 36,
-        paddingHorizontal: 16,
-        borderRadius: 999,
-        backgroundColor: "#E5E7EB",
-        marginRight: 8,
-        justifyContent: "center",
-        alignItems: "center",
-    },
-    chipActive: {
-        backgroundColor: "#4F46E5",
-    },
-    chipText: {
-        color: "#374151",
-        fontSize: 13,
-    },
-    chipTextActive: {
-        color: "#fff",
-        fontWeight: "600",
-    },
+    cardHeader: { padding: 20, paddingBottom: 28 },
+    headerTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    cardTitle: { fontSize: 22, fontWeight: "800", color: "#FFF", flex: 1, marginRight: 10 },
+    badge: { backgroundColor: "rgba(0,0,0,0.15)", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+    badgeText: { color: "#FFF", fontSize: 10, fontWeight: '800', textTransform: 'uppercase' },
 
-    empty: {
-        textAlign: "center",
-        marginTop: 40,
-        color: "#6B7280",
+    cardBody: { 
+        padding: 20, 
+        marginTop: -15, 
+        backgroundColor: "#FFF", 
+        borderTopLeftRadius: 24, 
+        borderTopRightRadius: 24 
     },
+    cardDesc: { color: "#374151", fontSize: 15, marginBottom: 16, lineHeight: 22 },
+    metaContainer: { marginBottom: 16, gap: 6 },
+    metaText: { fontSize: 13, color: "#6B7280", fontWeight: '600' },
+    
+    locationContainer: { marginBottom: 18, alignSelf: 'flex-start' },
+    locationLink: { color: "#4F46E5", fontWeight: "700", fontSize: 14 },
 
-    card: {
-        backgroundColor: "#fff",
-        borderRadius: 16,
-        marginBottom: 16,
-        overflow: "hidden",
-        elevation: 2,
-    },
-    cardHeader: {
-        padding: 16,
-    },
-    cardHeaderText: {
-        fontSize: 28,
-        fontWeight: "700",
-        color: "#fff",
-    },
-    badge: {
-        marginTop: 8,
-        backgroundColor: "rgba(0,0,0,0.6)",
-        alignSelf: "flex-start",
-        borderRadius: 8,
-        paddingHorizontal: 8,
-        paddingVertical: 4,
-    },
-    badgeText: {
-        color: "#fff",
-        fontSize: 11,
-    },
-    cardBody: {
-        padding: 16,
-    },
-    cardDesc: {
-        color: "#6B7280",
-        fontSize: 13,
-        marginBottom: 8,
-    },
-    meta: {
-        fontSize: 12,
-        color: "#6B7280",
-        marginBottom: 4,
-    },
-    actionBtn: {
-        marginTop: 10,
-        paddingVertical: 10,
-        borderRadius: 999,
-        alignItems: "center",
-    },
-    joinBtn: {
-        backgroundColor: "#4F8F6F",
-    },
-    leaveBtn: {
-        backgroundColor: "#E5E7EB",
-    },
-    actionText: {
-        color: "#fff",
-        fontWeight: "600",
-    },
+    btn: { height: 52, borderRadius: 16, justifyContent: "center", alignItems: "center" },
+    btnJoined: { backgroundColor: "#F3F4F6", borderWidth: 1, borderColor: "#E5E7EB" },
+    btnText: { color: "#FFF", fontWeight: "700", fontSize: 16 },
+
+    ownerBox: { paddingVertical: 12, borderTopWidth: 1, borderTopColor: '#F3F4F6', alignItems: 'center' },
+    ownerText: { fontSize: 12, color: "#9CA3AF", fontStyle: 'italic' },
+
+    emptyContainer: { alignItems: 'center', marginTop: 80 },
+    emptyEmoji: { fontSize: 48, marginBottom: 10 },
+    emptyText: { fontSize: 16, color: '#9CA3AF', fontWeight: '500' },
 });

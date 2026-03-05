@@ -11,17 +11,8 @@ import { Calendar } from "react-native-calendars";
 import { getAuth } from "firebase/auth";
 import { collection, getDocs } from "firebase/firestore";
 import { db } from "../../FirebaseConfig";
-import { router } from "expo-router";
-
-type EventType = {
-    id: string;
-    name: string;
-    date: string;
-    time: string;
-    details?: string;
-    userId: string;
-    invitedUserIds?: string[];
-};
+import { useNavigation } from "@react-navigation/native";
+import { EventType } from "../../utils/types";
 type DayPress = {
     dateString: string;
     day: number;
@@ -38,6 +29,7 @@ export default function CalendarScreen() {
     const [selectedDate, setSelectedDate] = useState<string>("");
     const [eventsByDate, setEventsByDate] = useState<EventsByDate>({});
     const [loading, setLoading] = useState(false);
+    const navigation = useNavigation<any>();
 
     useEffect(() => {
         const fetchEvents = async () => {
@@ -112,27 +104,30 @@ export default function CalendarScreen() {
         ? eventsByDate[selectedDate] || []
         : [];
 
-    const openChat = (eventId: string) => {
-        router.push({
-            pathname: "/chat/[eventId]",
-            params: { eventId },
+    const openChat = (event: EventType) => {
+        navigation.navigate("Chat", {
+            eventId: event.id,
+            name: event.name,
+            date: event.date,
+            time: event.time,
+            participantsCount: 1,
         });
     };
 
     const renderEventItem = ({ item }: { item: EventType }) => (
         <TouchableOpacity
             style={styles.eventCard}
-            onPress={() => openChat(item.id)}   // 👈 натискаєш на картку — відкривається чат
+            onPress={() => openChat(item)}
         >
             <Text style={styles.eventName}>{item.name}</Text>
             <Text style={styles.eventMeta}>
                 {item.time} {item.details ? `• ${item.details}` : ""}
             </Text>
 
-            <TouchableOpacity
-                style={styles.chatButton}
-                onPress={() => openChat(item.id)} // 👈 окрема кнопка Open chat
-            >
+                <TouchableOpacity
+                    style={styles.chatButton}
+                    onPress={() => openChat(item)}
+                >
                 <Text style={styles.chatButtonText}>Open chat</Text>
             </TouchableOpacity>
         </TouchableOpacity>

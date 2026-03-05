@@ -12,16 +12,9 @@ import {
     subscribeToInvitedEvents,
     calculateProfileStats,
 } from "../../utils/firestoreHelpers";
+import { EventType } from "../../utils/types";
 import { ScrollView } from "react-native";
 import {doc, onSnapshot} from "firebase/firestore";
-
-type EventType = {
-    id: string;
-    date?: string;              // "YYYY-MM-DD"
-    acceptedUserIds?: string[];
-    invitedUserIds?: string[];
-    [key: string]: any;
-};
 
 export default function ProfileScreen() {
     const [modalVisible, setModalVisible] = useState(false);
