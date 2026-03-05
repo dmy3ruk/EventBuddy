@@ -20,6 +20,7 @@ import {
 } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 import { db } from "../../FirebaseConfig";
+import {data} from "browserslist";
 
 /* ================= TYPES ================= */
 type EventData = {
@@ -46,7 +47,7 @@ const CATEGORIES = ["All", "networking", "outdoor", "creative", "social", "welln
 export default function PublicEventsScreen() {
     const [events, setEvents] = useState<EventItem[]>([]);
     const [activeCategory, setActiveCategory] = useState("All");
-
+    const today = new Date();
     const uid = getAuth().currentUser?.uid;
 
     useEffect(() => {
@@ -75,7 +76,10 @@ export default function PublicEventsScreen() {
         if (uid) {
             list = list.filter((e) => e.userId !== uid);
         }
-
+        list = list.filter((e) => {
+            const eventDate = new Date(`${e.date}T${e.time}`);
+            return eventDate >= today;
+        });
         // 🎯 фільтр по категорії
         if (activeCategory !== "All") {
             list = list.filter((e) => e.category === activeCategory);

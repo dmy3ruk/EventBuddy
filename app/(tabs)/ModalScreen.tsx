@@ -1,32 +1,15 @@
 import React, { useState, useEffect, useMemo } from "react";
-import {
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
-    TouchableOpacity,
-    Modal,
-    Platform,
-    ScrollView,
-} from "react-native";
+import {StyleSheet, Text, TextInput, View, TouchableOpacity, Modal, Platform, ScrollView,} from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { getAuth } from "firebase/auth";
 import { collection, getDocs } from "firebase/firestore";
 import { db } from "../../FirebaseConfig";
 import { createEventWithChat } from "../../utils/createEventWithChat";
 import CategoryModal from "./CategoryModal";
+import MapView, { Marker } from "react-native-maps";
 
 /* ===== CATEGORIES ===== */
-const CATEGORIES = [
-    "🎉 Party",
-    "🎬 Movie",
-    "☕ Coffee",
-    "🎮 Games",
-    "🏃 Sport",
-    "🎵 Music",
-    "📚 Study",
-    "🍽 Food",
-];
+const CATEGORIES = [ "🎉 Party",  "🎬 Movie", "☕ Coffee", "🎮 Games", "🏃 Sport", "🎵 Music", "📚 Study", "🍽 Food",];
 
 type ModalScreenProps = {
     visible: boolean;
@@ -38,23 +21,34 @@ type FriendItem = {
     username: string;
 };
 
+const [location, setLocation] = useState<{
+    latitude: number;
+    longitude: number;
+} | undefined>(undefined);
+
+const [mapVisible, setMapVisible] = useState(false);
+
+
 export default function ModalScreen({ visible, closeModal }: ModalScreenProps) {
     const [eventType, setEventType] = useState<"public" | "private">("public");
-
     const [name, setName] = useState("");
     const [details, setDetails] = useState("");
     const [date, setDate] = useState(new Date());
     const [time, setTime] = useState(new Date());
-
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [showTimePicker, setShowTimePicker] = useState(false);
-
     const [availableFriends, setAvailableFriends] = useState<FriendItem[]>([]);
     const [selectedFriendIds, setSelectedFriendIds] = useState<string[]>([]);
     const [friendsSearch, setFriendsSearch] = useState("");
-
     const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
     const [categoryModalVisible, setCategoryModalVisible] = useState(false);
+    const [location, setLocation] = useState<{
+        latitude: number;
+        longitude: number;
+    } | null>(null);
+
+    const [mapVisible, setMapVisible] = useState(false);
+
 
     const auth = getAuth();
 
@@ -111,6 +105,7 @@ export default function ModalScreen({ visible, closeModal }: ModalScreenProps) {
             category: selectedCategory,
             invitedUserIds: eventType === "private" ? selectedFriendIds : [],
             isPublic: eventType === "public",
+            location: location ?? undefined
         });
 
         setName("");
@@ -276,7 +271,22 @@ export default function ModalScreen({ visible, closeModal }: ModalScreenProps) {
                             >
                                 {selectedCategory || "Choose category"}
                             </Text>
+
+                            {/*maps*/}
+
                             <Text>▾</Text>
+                        </TouchableOpacity>
+                        <Text style={styles.label}>Location</Text>
+                        <TouchableOpacity
+                            style={styles.selectInput}
+                            onPress={() => setMapVisible(true)}
+                        >
+                            <Text style={styles.selectText}>
+                                {location
+                                    ? `${location.latitude.toFixed(4)}, ${location.longitude.toFixed(4)}`
+                                    : "Choose location on map"}
+                            </Text>
+                            <Text>📍</Text>
                         </TouchableOpacity>
 
                         {/* INVITE FRIENDS */}
@@ -370,6 +380,43 @@ export default function ModalScreen({ visible, closeModal }: ModalScreenProps) {
                     />
                 </View>
             </View>
+            {/* MAP MODAL */}
+            <Modal visible={mapVisible} animationType="slide">
+                <View style={{ flex: 1 }}>
+                    <MapView
+                        style={{ flex: 1 }}
+                        initialRegion={{
+                            latitude: location?.latitude || 50.4501,
+                            longitude: location?.longitude || 30.5234,
+                            latitudeDelta: 0.01,
+                            longitudeDelta: 0.01,
+                        }}
+                        onPress={(e) => {
+                            setLocation(e.nativeEvent.coordinate);
+                        }}
+                    >
+                        {location && <Marker coordinate={location} />}
+                    </MapView>
+
+                    <View style={styles.mapActions}>
+                        <TouchableOpacity
+                            style={styles.cancelBtn}
+                            onPress={() => setMapVisible(false)}
+                        >
+                            <Text>Cancel</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            style={styles.createBtn}
+                            onPress={() => setMapVisible(false)}
+                            disabled={!location}
+                        >
+                            <Text style={{ color: "#fff" }}>Confirm</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
+
         </Modal>
     );
 }
@@ -381,6 +428,12 @@ const styles = StyleSheet.create({
         backgroundColor: "rgba(0,0,0,0.6)",
         justifyContent: "center",
         padding: 12,
+    },
+    mapActions: {
+        flexDirection: "row",
+        gap: 10,
+        padding: 12,
+        backgroundColor: "#fff",
     },
     container: {
         backgroundColor: "#fff",

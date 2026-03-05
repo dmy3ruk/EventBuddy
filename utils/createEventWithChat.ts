@@ -18,6 +18,10 @@ type CreateEventPayload = {
     details?: string;
     invitedUserIds?: string[];
     isPublic: boolean;
+    location?: {
+        latitude: number;
+        longitude: number;
+    };
 };
 
 export async function createEventWithChat(payload: CreateEventPayload) {
@@ -36,6 +40,7 @@ export async function createEventWithChat(payload: CreateEventPayload) {
         invitedUserIds: payload.invitedUserIds || [],
         acceptedUserIds: [user.uid],
         isPublic: payload.isPublic,
+        location: payload.location || undefined,
         createdAt: serverTimestamp(),
     });
 

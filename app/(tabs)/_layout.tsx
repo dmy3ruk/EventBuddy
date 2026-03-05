@@ -37,7 +37,7 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
 
     // маршрути, які НЕ показуємо внизу
     const visibleRoutes = state.routes.filter(
-        (route) => route.name !== "Chats" && route.name !== "Chat"
+        (route) => route.name !== "Chats" && route.name !== "Chat" &&  route.name !== "Calendar"
     );
 
     return (
@@ -50,9 +50,8 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
                 };
 
                 let iconSource;
-                if (route.name === "Home") iconSource = require("../../assets/images/Home 1.svg");
-                if (route.name === "Calendar") iconSource = require("../../assets/images/Calender 2.svg");
-                if (route.name === "Profile") iconSource = require("../../assets/images/Profile Circle.svg");
+                if (route.name === "Home") iconSource = require("../../assets/images/Home.svg");
+                if (route.name === "Profile") iconSource = require("../../assets/images/ProfileCircle.svg");
                 if (route.name === "Friends") iconSource = require("../../assets/images/search.svg");
                 if (route.name === "Public Events") iconSource = require("../../assets/images/people.svg");
 
@@ -93,21 +92,26 @@ export default function TabLayout() {
                 tabBar={(props) => <CustomTabBar {...props} />}
             >
                 <Tab.Screen name="Home" component={HomeScreen} />
-                <Tab.Screen name="Friends" component={FriendsScreen} />
-                <Tab.Screen name="Calendar" component={CalendarScreen} />
-                <Tab.Screen name="Profile" component={ProfileScreen} />
                 <Tab.Screen name="Public Events" component={PublicEventsScreen} />
+                <Tab.Screen name="Friends" component={FriendsScreen} />
+                <Tab.Screen name="Profile" component={ProfileScreen} />
 
                 {/* приховані з таббару екрани */}
                 <Tab.Screen
+                    name="Calendar"
+                    component={CalendarScreen}
+                    options={{tabBarButton: () => null }}
+                />
+
+                <Tab.Screen
                     name="Chat"
                     component={ChatScreen}
-                    options={{ tabBarButton: () => null }}
+                    options={{tabBarButton: () => null }}
                 />
                 <Tab.Screen
                     name="Chats"
                     component={ChatsListScreen}
-                    options={{ tabBarButton: () => null }}
+                    options={{tabBarButton: () => null }}
                 />
             </Tab.Navigator>
 

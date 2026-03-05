@@ -203,12 +203,13 @@ export default function HomeScreen() {
                         <View style={styles.todayCard}>
                             <View style={styles.todayHeader}>
                                 <View style={styles.today}>
-                                    <Image
-                                        source={require("../../assets/images/today.svg")}
-                                        style={{ width: 40, height: 40 }}
-                                    />
+                                    <TouchableOpacity onPress={() => navigation.navigate("Calendar")}>
+                                    <Image source={require("../../assets/images/today.svg")}
+                                        style={{ width: 40, height: 40 }} />
+                                    </TouchableOpacity>
                                     <Text style={styles.todayTitle}>Today</Text>
                                 </View>
+
                             </View>
 
                             {todayEvent ? (
@@ -363,7 +364,7 @@ const styles = StyleSheet.create({
         borderRadius: 40,
         borderWidth: 0.5,
         borderColor: "#E2E8F0",
-        marginHorizontal: 16,
+        marginHorizontal: 20,
     },
 
     tab: {

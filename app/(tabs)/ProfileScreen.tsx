@@ -4,7 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { getAuth } from "firebase/auth";
 import { router } from "expo-router";
-import { auth } from "../../FirebaseConfig";
+import {auth, db} from "../../FirebaseConfig";
 
 import {
     fetchUsername,
@@ -13,6 +13,7 @@ import {
     calculateProfileStats,
 } from "../../utils/firestoreHelpers";
 import { ScrollView } from "react-native";
+import {doc, onSnapshot} from "firebase/firestore";
 
 type EventType = {
     id: string;
@@ -32,6 +33,9 @@ export default function ProfileScreen() {
     const [upcomingCount, setUpcomingCount] = useState(0);
     const [pendingInvitesCount, setPendingInvitesCount] = useState(0);
     const [totalAttendees, setTotalAttendees] = useState(0);
+    const [friendsConected, setFriendsConected ]= useState(0);
+    const uid = getAuth().currentUser?.uid;
+    const email = getAuth().currentUser?.email;
 
     // завантаження username через хелпер
     useEffect(() => {
@@ -76,9 +80,22 @@ export default function ProfileScreen() {
         return unsubscribeInvited;
     }, []);
 
+    useEffect(() => {
+        if (!uid) return;
+
+        const unsubscribeFriends = onSnapshot(doc(db, "users", uid), (docSnap) => {
+            if (docSnap.exists()) {
+                const friends = docSnap.data().friends || [];
+                setFriendsConected(friends.length);
+            }
+        });
+
+        return unsubscribeFriends();
+    }, []);
+
+
     // перерахунок статистики при зміні списків подій
     useEffect(() => {
-        const uid = getAuth().currentUser?.uid;
         if (!uid) return;
 
         const stats = calculateProfileStats(ownerEvents, invitedEvents, uid);
@@ -91,11 +108,12 @@ export default function ProfileScreen() {
     const handleLogout = async () => {
         try {
             await auth.signOut();
-            setModalVisible(false);
+            router.replace("/SignIn");
         } catch (e) {
             console.log("Logout error", e);
         }
     };
+
 
     return (
         <ScrollView
@@ -121,7 +139,7 @@ export default function ProfileScreen() {
 
                 <View style={styles.description}>
                     <Text style={styles.name}>{username}</Text>
-                    <Text style={styles.email}>{username}@email.com</Text>
+                    <Text style={styles.email}>{email}</Text>
                 </View>
             </View>
 
@@ -138,7 +156,7 @@ export default function ProfileScreen() {
                         <Text style={styles.statLabel}>Events Attended</Text>
                     </View>
                     <View style={styles.statItem}>
-                        <Text style={styles.statNumber}>156</Text>
+                        <Text style={styles.statNumber}>{friendsConected}</Text>
                         <Text style={styles.statLabel}>Friends Connected</Text>
                     </View>
                     <View style={styles.statItem}>
@@ -178,20 +196,20 @@ export default function ProfileScreen() {
                     <Ionicons name="chevron-forward" size={18} color="#999" />
                 </View>
 
-                <View style={styles.settingsItem}>
-                    <Image
-                        source={require("../../assets/images/verification.svg")}
-                        style={{ width: 40, height: 40, marginRight:8 }}
-                        contentFit="contain"
-                    />
-                    <View style={styles.settingsText}>
-                        <Text style={styles.settingsTitle}>Account Verification</Text>
-                        <Text style={styles.settingsSub}>Verify your account for added security</Text>
-                    </View>
-                    <View style={styles.verifiedBadge}>
-                        <Text style={styles.verifiedText}>Verified</Text>
-                    </View>
-                </View>
+                {/*<View style={styles.settingsItem}>*/}
+                {/*    <Image*/}
+                {/*        source={require("../../assets/images/verification.svg")}*/}
+                {/*        style={{ width: 40, height: 40, marginRight:8 }}*/}
+                {/*        contentFit="contain"*/}
+                {/*    />*/}
+                {/*    <View style={styles.settingsText}>*/}
+                {/*        <Text style={styles.settingsTitle}>Account Verification</Text>*/}
+                {/*        <Text style={styles.settingsSub}>Verify your account for added security</Text>*/}
+                {/*    </View>*/}
+                {/*    <View style={styles.verifiedBadge}>*/}
+                {/*        <Text style={styles.verifiedText}>Verified</Text>*/}
+                {/*    </View>*/}
+                {/*</View>*/}
 
                 <TouchableOpacity style={[styles.settingsItem, { marginBottom: 12 }]} onPress={handleLogout}>
                     <Image

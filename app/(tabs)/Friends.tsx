@@ -1,41 +1,16 @@
 import React, { useEffect, useState } from "react";
 import { Alert } from "react-native";
-import {
-    SafeAreaView,
-    View,
-    ScrollView,
-    Text,
-    TouchableOpacity,
-    TextInput,
-    StyleSheet,
-} from "react-native";
+import {View, ScrollView, Text, TouchableOpacity, TextInput, StyleSheet,} from "react-native";
 import { Image } from "expo-image";
 import * as Clipboard from "expo-clipboard";
 
 import { getAuth } from "firebase/auth";
-import {
-    collection,
-    query,
-    where,
-    getDocs,
-    doc,
-    getDoc,
-    setDoc,
-    serverTimestamp,
-    deleteDoc,
-    addDoc,
-} from "firebase/firestore";
+import {collection, query, where, getDocs, doc, getDoc, setDoc, serverTimestamp, deleteDoc, addDoc,} from "firebase/firestore";
 import { db } from "../../FirebaseConfig";
+import { SafeAreaView } from "react-native-safe-area-context";
 
-type UserItem = {
-    uid: string;
-    username: string;
-};
-
-type FriendItem = {
-    uid: string;
-    username: string;
-};
+type UserItem = { uid: string; username: string; };
+type FriendItem = { uid: string; username: string; };
 
 type FriendRequest = {
     id: string;
@@ -702,8 +677,8 @@ const styles = StyleSheet.create({
         flexDirection: "row",
         justifyContent: "space-between",
         alignItems: "center",
-        paddingTop: 57,
-        paddingBottom: 20,
+        paddingTop: 20,
+        paddingBottom: 12,
         paddingHorizontal: 17,
         backgroundColor: "#F9F9F9",
     },

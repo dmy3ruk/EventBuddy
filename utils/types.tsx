@@ -9,4 +9,5 @@ export type EventType = {
     createdAt: any;
     invitedUserIds?: string[];
     acceptedUserIds?: string[];
+    location: undefined,
 };
