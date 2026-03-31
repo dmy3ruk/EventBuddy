@@ -1,4 +1,6 @@
 import React, { useEffect, useState, useRef } from "react";
+import * as SystemUI from 'expo-system-ui';
+
 import {
     View,
     Text,
@@ -10,17 +12,15 @@ import {
     Platform,
     Image,
     Modal,
-    ActionSheetIOS,
+    StatusBar,
     Alert,
+    Dimensions,
 } from "react-native";
 
-import * as FileSystem from "expo-file-system/legacy";
-import * as MediaLibrary from "expo-media-library";
-import * as ImagePicker from "expo-image-picker";
 import * as Clipboard from "expo-clipboard";
-
+import ImageZoom from 'react-native-image-pan-zoom';
 import { useNavigation, useRoute } from "@react-navigation/native";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, Feather } from "@expo/vector-icons";
 import { db } from "../../FirebaseConfig";
 import { getAuth } from "firebase/auth";
 import {
@@ -31,1286 +31,383 @@ import {
     orderBy,
     serverTimestamp,
     doc,
-    getDoc,
     updateDoc,
     setDoc,
     writeBatch,
     arrayUnion,
     deleteDoc,
-    getDocs,
 } from "firebase/firestore";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import * as Haptics from 'expo-haptics';
 
-type Message = {
-    id: string;
-    text?: string;
-    userId?: string;
-    authorName?: string;
-    createdAt: any;
-    readBy?: string[];
-    type?: "text" | "image" | "system";
-    imageUrl?: string;
-    pinned?: boolean;
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+const COLORS = {
+    primary: "#505BEB",
+    bg: "#F1F5F9",
+    white: "#FFFFFF",
+    textMain: "#1A1A1A",
+    textMuted: "#64748B",
+    bubbleMine: "#505BEB",
+    bubbleOther: "#FFFFFF",
+    borderOther: "#E2E8F0",
+    destructive: "#EF4444",
 };
 
-const CLOUDINARY_CLOUD_NAME = "dxcqqbrpb";
-const CLOUDINARY_UPLOAD_PRESET = "eventbuddy_unsigned";
+// на початку компонента або в useEffect
+SystemUI.setBackgroundColorAsync('#FFFFFF');
 
 export default function ChatScreen() {
+    const insets = useSafeAreaInsets();
     const route = useRoute<any>();
-    const { eventId, name, date, time, participantsCount } = route.params || {};
+    const { eventId, name, time, participantsCount } = route.params || {};
 
-    const [messages, setMessages] = useState<Message[]>([]);
-    const [text, setText] = useState("");
-    const [myName, setMyName] = useState<string>("You");
-
+    const [messages, setMessages] = useState<any[]>([]);
+    const [pinnedMsg, setPinnedMsg] = useState<any>(null);
+    const [inputText, setInputText] = useState("");
     const [previewImage, setPreviewImage] = useState<string | null>(null);
     const [isPreviewVisible, setIsPreviewVisible] = useState(false);
-
     const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
-
-    const [menuMessage, setMenuMessage] = useState<Message | null>(null);
+    const [menuMessage, setMenuMessage] = useState<any | null>(null);
     const [isMenuVisible, setIsMenuVisible] = useState(false);
 
-    const [isChatInfoVisible, setIsChatInfoVisible] = useState(false);
-
-    const listRef = useRef<FlatList<Message> | null>(null);
-
+    const listRef = useRef<FlatList<any> | null>(null);
     const navigation = useNavigation<any>();
-    const auth = getAuth();
-    const user = auth.currentUser;
+    const authUser = getAuth().currentUser;
+    const currentUserName = authUser?.displayName || "User";
 
-    // lastRead
     useEffect(() => {
-        if (!user || !eventId) return;
-
-        const refDoc = doc(db, "users", user.uid, "chatStatus", eventId as string);
-        updateDoc(refDoc, { lastRead: serverTimestamp() }).catch(async () => {
-            await setDoc(refDoc, { lastRead: serverTimestamp() });
+        if (!authUser || !eventId) return;
+        const statusDocRef = doc(db, "users", authUser.uid, "chatStatus", eventId);
+        updateDoc(statusDocRef, { lastRead: serverTimestamp() }).catch(() => {
+            setDoc(statusDocRef, { lastRead: serverTimestamp() });
         });
-    }, [user, eventId]);
+    }, [authUser, eventId]);
 
-    // моє імʼя
     useEffect(() => {
-        const loadMyName = async () => {
-            if (!user) return;
-            try {
-                const snap = await getDoc(doc(db, "usernames", user.uid));
-                if (snap.exists()) {
-                    setMyName(snap.data().username || "You");
-                }
-            } catch (e) {
-                console.log("Error loading username:", e);
-            }
-        };
-        loadMyName();
-    }, [user]);
-
-    // повідомлення + readBy
-    useEffect(() => {
-        if (!eventId || !user) return;
-
-        const q = query(
-            collection(db, "events", eventId as string, "messages"),
-            orderBy("createdAt", "asc")
-        );
-
-        const unsubscribe = onSnapshot(q, async (snapshot) => {
-            const list: Message[] = snapshot.docs.map((docSnap) => ({
-                id: docSnap.id,
-                ...(docSnap.data() as any),
-            }));
-            setMessages(list);
-
+        if (!eventId || !authUser) return;
+        const messagesQuery = query(collection(db, "events", eventId, "messages"), orderBy("createdAt", "asc"));
+        const unsubscribeMessages = onSnapshot(messagesQuery, async (snapshot) => {
+            const fetchedMessages = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as any));
+            setMessages(fetchedMessages);
+            
             const batch = writeBatch(db);
-            let hasUpdates = false;
-
-            snapshot.docs.forEach((docSnap) => {
-                const data = docSnap.data() as any;
-                const isMine = data.userId === user.uid;
-                const readBy: string[] = data.readBy || [];
-
-                if (!isMine && !readBy.includes(user.uid)) {
-                    batch.update(docSnap.ref, {
-                        readBy: arrayUnion(user.uid),
-                    });
-                    hasUpdates = true;
+            let needsUpdate = false;
+            snapshot.docs.forEach(d => {
+                const data = d.data();
+                if (data.userId !== authUser.uid && !(data.readBy || []).includes(authUser.uid)) {
+                    batch.update(d.ref, { readBy: arrayUnion(authUser.uid) });
+                    needsUpdate = true;
                 }
             });
-
-            if (hasUpdates) {
-                try {
-                    await batch.commit();
-                } catch (e) {
-                    console.log("Error marking as read:", e);
-                }
-            }
+            if (needsUpdate) await batch.commit();
         });
 
-        return () => unsubscribe();
-    }, [eventId, user]);
+        const unsubscribeEvent = onSnapshot(doc(db, "events", eventId), (doc) => {
+            if (doc.exists()) setPinnedMsg(doc.data().pinnedMessage || null);
+        });
 
-    // pinned + editing message
-    const pinnedMessage = messages.find((m) => m.pinned);
-    const editingMessage = editingMessageId
-        ? messages.find((m) => m.id === editingMessageId) || null
-        : null;
+        return () => { unsubscribeMessages(); unsubscribeEvent(); };
+    }, [eventId, authUser]);
 
-    const scrollToPinned = () => {
-        if (!pinnedMessage) return;
-        const index = messages.findIndex((m) => m.id === pinnedMessage.id);
-        if (index === -1) return;
-
-        try {
-            listRef.current?.scrollToIndex({
-                index,
-                animated: true,
-            });
-        } catch (e) {
-            console.log("scrollToPinned error", e);
+    useEffect(() => {
+        if (messages.length > 0) {
+            setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
         }
-    };
+    }, [messages]);
 
-    // створення/редагування текстового повідомлення
-    const sendMessage = async () => {
-        if (!text.trim() || !user || !eventId) return;
-
-        if (editingMessageId) {
-            try {
-                const msgRef = doc(
-                    db,
-                    "events",
-                    eventId as string,
-                    "messages",
-                    editingMessageId
-                );
-
-                await updateDoc(msgRef, {
-                    text: text.trim(),
-                    editedAt: serverTimestamp(),
+    const handleSendMessage = async () => {
+        if (!inputText.trim() || !authUser || !eventId) return;
+        const textToSend = inputText.trim();
+        setInputText("");
+        
+        try {
+            if (editingMessageId) {
+                await updateDoc(doc(db, "events", eventId, "messages", editingMessageId), { 
+                    text: textToSend, editedAt: serverTimestamp() 
                 });
-
                 setEditingMessageId(null);
-                setText("");
-            } catch (e) {
-                console.log("Error updating message:", e);
-                Alert.alert("Помилка", "Не вдалося оновити повідомлення");
+            } else {
+                await addDoc(collection(db, "events", eventId, "messages"), { 
+                    text: textToSend, userId: authUser.uid, authorName: currentUserName,
+                    createdAt: serverTimestamp(), readBy: [authUser.uid], type: "text" 
+                });
             }
-            return;
-        }
-
-        await addDoc(collection(db, "events", eventId as string, "messages"), {
-            text: text.trim(),
-            userId: user.uid,
-            authorName: myName,
-            createdAt: serverTimestamp(),
-            readBy: [user.uid],
-            type: "text",
-            pinned: false,
-        });
-
-        setText("");
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        } catch (e) { Alert.alert("Error", "Failed to send message"); }
     };
 
-    // вибір і відправка фото через Cloudinary
-    const pickImageAndSend = async () => {
-        if (!user || !eventId) return;
+    const handleDeleteMessage = async (messageId: string) => {
+        Alert.alert("Delete message?", "This message will be removed for everyone.", [
+            { text: "Cancel", style: "cancel" },
+            { 
+                text: "Delete", 
+                style: "destructive", 
+                onPress: async () => {
+                    try {
+                        await deleteDoc(doc(db, "events", eventId, "messages", messageId));
+                        await addDoc(collection(db, "events", eventId, "messages"), {
+                            text: `${currentUserName} deleted a message`,
+                            type: "system",
+                            createdAt: serverTimestamp()
+                        });
+                        setIsMenuVisible(false);
+                        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                    } catch (e) { Alert.alert("Error", "Could not delete message"); }
+                } 
+            }
+        ]);
+    };
 
-        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (status !== "granted") {
-            alert("Доступ до галереї заборонений");
-            return;
-        }
-
-        const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Images,
-            quality: 0.8,
-        });
-
-        if (result.canceled) return;
-
+    const handlePinMessage = async (message: any) => {
         try {
-            const asset = result.assets[0];
-
-            const data = new FormData();
-            data.append("file", {
-                uri: asset.uri,
-                name: `event_${eventId}_${Date.now()}.jpg`,
-                type: "image/jpeg",
-            } as any);
-            data.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
-
-            const res = await fetch(
-                `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`,
-                {
-                    method: "POST",
-                    body: data,
+            await updateDoc(doc(db, "events", eventId), {
+                pinnedMessage: {
+                    id: message.id,
+                    text: message.type === 'image' ? "📷 Photo" : message.text,
+                    authorName: message.authorName
                 }
-            );
-
-            const json = await res.json();
-
-            if (!res.ok) {
-                console.log("Cloudinary error:", json);
-                alert("Не вдалося завантажити фото");
-                return;
-            }
-
-            const downloadURL = json.secure_url as string;
-
-            await addDoc(collection(db, "events", eventId as string, "messages"), {
-                userId: user.uid,
-                authorName: myName,
-                createdAt: serverTimestamp(),
-                readBy: [user.uid],
-                type: "image",
-                imageUrl: downloadURL,
-                pinned: false,
             });
-        } catch (e) {
-            console.log("Error sending image via Cloudinary:", e);
-            alert("Не вдалося надіслати фото");
-        }
-    };
-
-    // збереження фото в галерею
-    const saveImageToGallery = async (url: string) => {
-        try {
-            const { status } = await MediaLibrary.requestPermissionsAsync();
-            if (status !== "granted") {
-                Alert.alert(
-                    "Нема доступу",
-                    "Дай доступ до медіатеки, щоб зберігати фото"
-                );
-                return;
-            }
-
-            const dir =
-                (FileSystem.documentDirectory ??
-                    FileSystem.cacheDirectory ??
-                    FileSystem.documentDirectory!) + "";
-
-            const fileUri = `${dir}event_${Date.now()}.jpg`;
-
-            const downloadRes = await FileSystem.downloadAsync(url, fileUri);
-
-            const asset = await MediaLibrary.createAssetAsync(downloadRes.uri);
-            await MediaLibrary.createAlbumAsync("EventBuddy", asset, false);
-
-            Alert.alert("Готово", "Фото збережене у галерею");
-        } catch (e) {
-            console.log("Error saving image:", e);
-            Alert.alert("Помилка", "Не вдалося зберегти фото");
-        }
-    };
-
-    // меню в превʼю картинки (три крапки)
-    const openImageMenu = () => {
-        if (!previewImage) return;
-
-        if (Platform.OS === "ios") {
-            ActionSheetIOS.showActionSheetWithOptions(
-                {
-                    options: ["Зберегти в галерею", "Скасувати"],
-                    cancelButtonIndex: 1,
-                },
-                async (buttonIndex) => {
-                    if (buttonIndex === 0) {
-                        await saveImageToGallery(previewImage);
-                    }
-                }
-            );
-        } else {
-            Alert.alert("Фото", undefined, [
-                {
-                    text: "Зберегти в галерею",
-                    onPress: () => saveImageToGallery(previewImage),
-                },
-                { text: "Скасувати", style: "cancel" },
-            ]);
-        }
-    };
-
-    // довгий тап по своєму повідомленню (текст або фото)
-    const handleLongPressMessage = (msg: Message) => {
-        if (!user) return;
-        if (msg.userId !== user.uid) return;
-
-        setMenuMessage(msg);
-        setIsMenuVisible(true);
-    };
-
-    const formatTime = (msg: Message) => {
-        const ts: any = msg.createdAt;
-        if (!ts) return "";
-        let d: Date;
-        if (ts.toDate) d = ts.toDate();
-        else d = new Date(ts);
-        const hh = d.getHours().toString().padStart(2, "0");
-        const mm = d.getMinutes().toString().padStart(2, "0");
-        return `${hh}:${mm}`;
-    };
-
-    // очистка чату
-    const clearChatMessages = async () => {
-        if (!eventId) return;
-
-        try {
-            const messagesRef = collection(
-                db,
-                "events",
-                eventId as string,
-                "messages"
-            );
-
-            const snapshot = await getDocs(messagesRef);
-
-            if (snapshot.empty) {
-                Alert.alert("Чат порожній");
-                return;
-            }
-
-            const batch = writeBatch(db);
-            snapshot.forEach((docSnap) => {
-                batch.delete(docSnap.ref);
+            await addDoc(collection(db, "events", eventId, "messages"), {
+                text: `${currentUserName} pinned a message`,
+                type: "system",
+                createdAt: serverTimestamp()
             });
-
-            await batch.commit();
-
-            Alert.alert("Готово", "Чат очищено");
-        } catch (e) {
-            console.log("Error clearing chat:", e);
-            Alert.alert("Помилка", "Не вдалося очистити чат");
-        }
+            setIsMenuVisible(false);
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        } catch (e) { Alert.alert("Error", "Could not pin message"); }
     };
 
-    const confirmClearChat = () => {
-        Alert.alert(
-            "Очистити чат",
-            "Усі повідомлення цього чату будуть видалені для всіх учасників. Продовжити?",
-            [
-                { text: "Скасувати", style: "cancel" },
-                {
-                    text: "Очистити",
-                    style: "destructive",
-                    onPress: async () => {
-                        await clearChatMessages();
-                        setIsChatInfoVisible(false);
-                    },
-                },
-            ]
-        );
+    const handleUnpinMessage = async () => {
+        await updateDoc(doc(db, "events", eventId), { pinnedMessage: null });
     };
 
-    const renderMessage = ({ item }: { item: Message }) => {
-        const isSystem =
-            item.type === "system" || (!item.userId && item.type !== "image");
-        const isMine = item.userId === user?.uid;
-        const initials =
-            (item.authorName || "")
-                .trim()
-                .charAt(0)
-                .toUpperCase() || "?";
+    const renderMessageItem = ({ item, index }: { item: any, index: number }) => {
+        const isMine = item.userId === authUser?.uid;
+        const prevMessage = messages[index - 1];
+        const isSameAuthor = prevMessage?.userId === item.userId;
+        const isImage = item.type === "image";
 
-        if (isSystem) {
+        if (item.type === "system") {
             return (
                 <View style={styles.systemRow}>
-                    <View style={styles.systemBubble}>
-                        {!!item.text && (
-                            <Text style={styles.systemText}>{item.text}</Text>
-                        )}
-                    </View>
+                    <Text style={styles.systemText}>{item.text.toUpperCase()}</Text>
                 </View>
             );
         }
 
-        // окремий рендер для повідомлення з фото
-        if (item.type === "image" && item.imageUrl) {
-            return (
-                <View
-                    style={[
-                        styles.messageRow,
-                        isMine ? styles.messageRowMine : styles.messageRowOther,
-                    ]}
-                >
-                    {!isMine && (
-                        <View style={styles.avatar}>
-                            <Text style={styles.avatarText}>{initials}</Text>
-                        </View>
-                    )}
-
-                    <TouchableOpacity
-                        activeOpacity={0.9}
-                        delayLongPress={250}
-                        onLongPress={() => handleLongPressMessage(item)}
-                    >
-                        <View
-                            style={[
-                                styles.imageBubble,
-                                isMine ? styles.bubbleMine : styles.bubbleOther,
-                            ]}
-                        >
-                            {item.pinned && (
-                                <Text style={styles.pinnedLabel}>Pinned</Text>
-                            )}
-
-                            <TouchableOpacity
-                                onPress={() => {
-                                    setPreviewImage(item.imageUrl!);
-                                    setIsPreviewVisible(true);
-                                }}
-                                activeOpacity={0.9}
-                            >
-                                <Image
-                                    source={{ uri: item.imageUrl }}
-                                    style={styles.imageMessage}
-                                    resizeMode="cover"
-                                />
-                            </TouchableOpacity>
-
-                            <Text
-                                style={[
-                                    styles.messageTimeImage,
-                                    isMine && { color: "#E5E7EB" },
-                                ]}
-                            >
-                                {formatTime(item)}
-                            </Text>
-                        </View>
-                    </TouchableOpacity>
-                </View>
-            );
-        }
-
-        const bubbleContent = () => (
-            <View
-                style={[
-                    styles.bubble,
-                    isMine ? styles.bubbleMine : styles.bubbleOther,
-                ]}
-            >
-                {item.pinned && (
-                    <Text style={styles.pinnedLabel}>Pinned</Text>
-                )}
-
-                {!isMine && (
-                    <Text style={styles.senderName}>
-                        {item.authorName || "Participant"}
-                    </Text>
-                )}
-
-                <Text
-                    style={[
-                        styles.messageText,
-                        isMine && { color: "#FFFFFF" },
-                    ]}
-                >
-                    {item.text}
-                </Text>
-                <Text
-                    style={[
-                        styles.messageTime,
-                        isMine && { color: "#E5E7EB" },
-                    ]}
-                >
-                    {formatTime(item)}
-                </Text>
-            </View>
-        );
-
-        // текстове повідомлення
         return (
-            <View
-                style={[
-                    styles.messageRow,
-                    isMine ? styles.messageRowMine : styles.messageRowOther,
-                ]}
-            >
-                {!isMine && (
-                    <View style={styles.avatar}>
-                        <Text style={styles.avatarText}>{initials}</Text>
+            <View style={[styles.msgRow, isMine ? styles.rowMine : styles.rowOther, isSameAuthor && { marginTop: -8 }]}>
+                {!isMine && !isSameAuthor && (
+                    <View style={styles.avatarSmall}>
+                        <Text style={styles.avatarTextSmall}>{item.authorName?.[0]}</Text>
                     </View>
                 )}
+                {!isMine && isSameAuthor && <View style={{ width: 38 }} />}
 
-                <TouchableOpacity
-                    activeOpacity={0.9}
-                    delayLongPress={250}
-                    onLongPress={() => handleLongPressMessage(item)}
+                <TouchableOpacity 
+                    activeOpacity={0.8}
+                    onLongPress={() => { Haptics.selectionAsync(); setMenuMessage(item); setIsMenuVisible(true); }}
+                    onPress={() => isImage && (setPreviewImage(item.imageUrl), setIsPreviewVisible(true))}
+                    style={[styles.bubble, isMine ? styles.bubbleMine : styles.bubbleOther, isImage && styles.bubbleImage]}
                 >
-                    {bubbleContent()}
+                    {!isMine && !isSameAuthor && !isImage && <Text style={styles.authorName}>{item.authorName}</Text>}
+                    {isImage ? (
+                        <Image source={{ uri: item.imageUrl }} style={styles.msgImage} />
+                    ) : (
+                        <Text style={[styles.msgText, isMine && { color: '#FFF' }]}>{item.text}</Text>
+                    )}
+                    <View style={styles.msgFooter}>
+                        <Text style={[styles.msgTime, isMine && { color: 'rgba(255,255,255,0.7)' }]}>
+                            {item.createdAt ? new Date(item.createdAt.toDate?.() || item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ""}
+                        </Text>
+                        {isMine && <Ionicons name="checkmark-done" size={14} color="rgba(255,255,255,0.6)" style={{ marginLeft: 4 }} />}
+                    </View>
                 </TouchableOpacity>
             </View>
         );
     };
 
-    const subtitle = [date, time].filter(Boolean).join(" • ");
-
     return (
-        <KeyboardAvoidingView
-            style={styles.container}
-            behavior={Platform.OS === "ios" ? "padding" : undefined}
-        >
-            {/* HEADER */}
-            <View style={styles.header}>
-                <View style={styles.headerLeft}>
-                    <TouchableOpacity
-                        onPress={() => navigation.navigate("Home")}
-                        style={styles.backButton}
-                        hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
-                    >
-                        <Ionicons name="chevron-back" size={34} color="black" />
+        <View style={styles.mainContainer}>
+            
+            <StatusBar barStyle="dark-content" />
+            
+            {/* Header */}
+            <View style={[styles.headerWrapper, { paddingTop: insets.top }]}>
+                <View style={styles.header}>
+                    <TouchableOpacity style={styles.iconButton} onPress={() => navigation.goBack()}>
+                        <Feather name="chevron-left" size={28} color={COLORS.primary} />
                     </TouchableOpacity>
-                    <View style={styles.headerIcon}>
-                        <Ionicons name="calendar-outline" size={18} color="#505BEB" />
+                    <View style={styles.headerInfo}>
+                        <Text style={styles.headerTitle} numberOfLines={1}>{name}</Text>
+                        <Text style={styles.headerSubtitle}>{participantsCount} members • {time}</Text>
                     </View>
-                    <View style={styles.headerTextBlock}>
-                        <Text style={styles.eventTitle}>{name || "Event chat"}</Text>
-                        {!!subtitle && (
-                            <Text style={styles.eventSubtitle}>{subtitle}</Text>
-                        )}
-                        {typeof participantsCount === "number" && (
-                            <Text style={styles.participantsText}>
-                                {participantsCount} participants
-                            </Text>
-                        )}
-                    </View>
+                    <TouchableOpacity style={styles.iconButton}>
+                        <Feather name="more-vertical" size={22} color={COLORS.textMuted} />
+                    </TouchableOpacity>
                 </View>
-                <TouchableOpacity
-                    onPress={() => setIsChatInfoVisible(true)}
-                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                >
-                    <Ionicons name="ellipsis-vertical" size={18} color="#6E7D93" />
-                </TouchableOpacity>
             </View>
 
-            {/* PINNED MESSAGE BAR */}
-            {pinnedMessage && (
-                <TouchableOpacity
-                    style={styles.pinnedBar}
-                    activeOpacity={0.8}
-                    onPress={scrollToPinned}
-                >
-                    <View style={styles.pinnedBarLeft}>
-                        <Ionicons
-                            name="pin-outline"
-                            size={20}
-                            color="green"
-                            style={{ marginRight: 8 }}
-                        />
-                        <View style={styles.pinnedBarTextBox}>
-                            <Text style={styles.pinnedBarTitle}>
-                                Pinned message
-                            </Text>
-                            <Text
-                                style={styles.pinnedBarPreview}
-                                numberOfLines={1}
-                            >
-                                {pinnedMessage.text ||
-                                    (pinnedMessage.type === "image"
-                                        ? "Photo"
-                                        : "")}
-                            </Text>
-                        </View>
+            {/* Pinned Message */}
+            {pinnedMsg && (
+                <View style={styles.pinnedContainer}>
+                    <Ionicons name="pin" size={16} color={COLORS.primary} style={{ marginRight: 8 }} />
+                    <View style={{ flex: 1 }}>
+                        <Text style={styles.pinnedLabel}>Pinned</Text>
+                        <Text style={styles.pinnedText} numberOfLines={1}>{pinnedMsg.text}</Text>
                     </View>
-                </TouchableOpacity>
-            )}
-
-            {/* MESSAGES */}
-            <FlatList
-                ref={listRef}
-                data={messages}
-                keyExtractor={(item) => item.id}
-                renderItem={renderMessage}
-                contentContainerStyle={styles.messagesList}
-                onScrollToIndexFailed={(info) => {
-                    setTimeout(() => {
-                        listRef.current?.scrollToIndex({
-                            index: info.index,
-                            animated: true,
-                        });
-                    }, 50);
-                }}
-            />
-
-            {/* EDITING BAR (над інпутом) */}
-            {editingMessage && (
-                <View style={styles.editBar}>
-                    <View style={styles.editBarLeft}>
-                        <Ionicons
-                            name="create-outline"
-                            size={20}
-                            color="#7ea3e5"
-                            style={{ marginRight: 6 }}
-                        />
-                        <View style={styles.editBarTextBox}>
-                            <Text style={styles.editBarTitle}>
-                                Редагувати повідомлення
-                            </Text>
-                            <Text
-                                style={styles.editBarPreview}
-                                numberOfLines={1}
-                            >
-                                {editingMessage.text}
-                            </Text>
-                        </View>
-                    </View>
-                    <TouchableOpacity
-                        onPress={() => {
-                            setEditingMessageId(null);
-                            setText("");
-                        }}
-                    >
-                        <Ionicons name="close" size={18} color="#9CA3AF" />
+                    <TouchableOpacity onPress={handleUnpinMessage}>
+                        <Ionicons name="close" size={20} color={COLORS.textMuted} />
                     </TouchableOpacity>
                 </View>
             )}
 
-            {/* INPUT */}
-            <View style={styles.inputBar}>
-                <View style={styles.inputContainer}>
-                    <TouchableOpacity
-                        style={styles.attachBtn}
-                        onPress={pickImageAndSend}
-                    >
-                        <Ionicons name="attach-outline" size={20} color="#6E7D93" />
-                    </TouchableOpacity>
-                    <TextInput
-                        style={styles.textInput}
-                        placeholder="Type a message..."
-                        value={text}
-                        onChangeText={setText}
-                        multiline
-                    />
-                </View>
-                <TouchableOpacity style={styles.sendFab} onPress={sendMessage}>
-                    <Ionicons name="send" size={18} color="#fff" />
-                </TouchableOpacity>
-            </View>
-
-            {/* PREVIEW IMAGE MODAL */}
-            {previewImage && (
-                <Modal
-                    visible={isPreviewVisible}
-                    transparent
-                    animationType="fade"
-                    onRequestClose={() => setIsPreviewVisible(false)}
-                >
-                    <View style={styles.previewBackdrop}>
-                        <View style={styles.previewContent}>
-                            <View style={styles.previewHeader}>
-                                <TouchableOpacity
-                                    onPress={() => setIsPreviewVisible(false)}
-                                >
-                                    <Ionicons
-                                        name="close"
-                                        size={24}
-                                        color="#111827"
-                                    />
-                                </TouchableOpacity>
-                                <TouchableOpacity onPress={openImageMenu}>
-                                    <Ionicons
-                                        name="ellipsis-vertical"
-                                        size={22}
-                                        color="#111827"
-                                    />
-                                </TouchableOpacity>
-                            </View>
-                            <Image
-                                source={{ uri: previewImage }}
-                                style={styles.previewImage}
-                                resizeMode="contain"
-                            />
-                        </View>
-                    </View>
-                </Modal>
-            )}
-
-            {/* MESSAGE MENU MODAL */}
-            {menuMessage && (
-                <Modal
-                    visible={isMenuVisible}
-                    transparent
-                    animationType="fade"
-                    onRequestClose={() => setIsMenuVisible(false)}
-                >
-                    <View style={styles.menuBackdrop}>
-                        <View style={styles.menuContainer}>
-                            {(menuMessage.text || menuMessage.imageUrl) && (
-                                <TouchableOpacity
-                                    style={styles.menuItem}
-                                    onPress={async () => {
-                                        const value =
-                                            menuMessage.text ||
-                                            menuMessage.imageUrl ||
-                                            "";
-                                        await Clipboard.setStringAsync(value);
-                                        setIsMenuVisible(false);
-                                    }}
-                                >
-                                    <Text style={styles.menuItemText}>
-                                        Copy
-                                    </Text>
-                                </TouchableOpacity>
-                            )}
-
-                            {menuMessage.type === "text" && menuMessage.text && (
-                                <TouchableOpacity
-                                    style={styles.menuItem}
-                                    onPress={() => {
-                                        setEditingMessageId(menuMessage.id);
-                                        setText(menuMessage.text || "");
-                                        setIsMenuVisible(false);
-                                    }}
-                                >
-                                    <Text style={styles.menuItemText}>
-                                        Edit
-                                    </Text>
-                                </TouchableOpacity>
-                            )}
-
-                            <TouchableOpacity
-                                style={styles.menuItem}
-                                onPress={async () => {
-                                    if (!eventId || !menuMessage) return;
-
-                                    try {
-                                        const messagesRef = collection(
-                                            db,
-                                            "events",
-                                            eventId as string,
-                                            "messages"
-                                        );
-
-                                        // якщо вже pinned — просто знімаємо
-                                        if (menuMessage.pinned) {
-                                            const msgRef = doc(
-                                                db,
-                                                "events",
-                                                eventId as string,
-                                                "messages",
-                                                menuMessage.id
-                                            );
-                                            await updateDoc(msgRef, {
-                                                pinned: false,
-                                            });
-                                        } else {
-                                            // робимо щоб було тільки одне pinned
-                                            const snapshot = await getDocs(
-                                                messagesRef
-                                            );
-                                            const batch = writeBatch(db);
-
-                                            snapshot.forEach((docSnap) => {
-                                                const data = docSnap.data() as any;
-                                                if (docSnap.id === menuMessage.id) {
-                                                    batch.update(docSnap.ref, {
-                                                        pinned: true,
-                                                    });
-                                                } else if (data.pinned) {
-                                                    batch.update(docSnap.ref, {
-                                                        pinned: false,
-                                                    });
-                                                }
-                                            });
-
-                                            await batch.commit();
-                                        }
-                                    } catch (e) {
-                                        console.log("Error pinning message:", e);
-                                    } finally {
-                                        setIsMenuVisible(false);
-                                    }
-                                }}
-                            >
-                                <Text style={styles.menuItemText}>
-                                    {menuMessage.pinned ? "Unpin" : "Pin"}
-                                </Text>
-                            </TouchableOpacity>
-
-                            <TouchableOpacity
-                                style={[styles.menuItem, styles.menuItemDestructive]}
-                                onPress={async () => {
-                                    try {
-                                        await deleteDoc(
-                                            doc(
-                                                db,
-                                                "events",
-                                                eventId as string,
-                                                "messages",
-                                                menuMessage.id
-                                            )
-                                        );
-                                    } catch (e) {
-                                        console.log("Error deleting message:", e);
-                                        Alert.alert(
-                                            "Помилка",
-                                            "Не вдалося видалити повідомлення"
-                                        );
-                                    } finally {
-                                        setIsMenuVisible(false);
-                                    }
-                                }}
-                            >
-                                <Text style={styles.menuItemDestructiveText}>
-                                    Delete
-                                </Text>
-                            </TouchableOpacity>
-
-                            <TouchableOpacity
-                                style={[styles.menuItem, styles.menuItemCancel]}
-                                onPress={() => setIsMenuVisible(false)}
-                            >
-                                <Text style={styles.menuItemText}>Cancel</Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                </Modal>
-            )}
-
-            {/* CHAT INFO MODAL */}
-            <Modal
-                visible={isChatInfoVisible}
-                transparent
-                animationType="fade"
-                onRequestClose={() => setIsChatInfoVisible(false)}
+            {/* Головний контент з KeyboardAvoidingView */}
+            <KeyboardAvoidingView 
+                style={{ flex: 1 }} 
+                behavior={Platform.OS === "ios" ? "padding" : undefined}
+                keyboardVerticalOffset={0}
             >
-                <View style={styles.menuBackdrop}>
-                    <View style={styles.chatInfoContainer}>
-                        {/* Хедер модалки */}
-                        <View style={styles.chatInfoHeader}>
-                            <Text style={styles.chatInfoTitle}>
-                                Chat info
-                            </Text>
-                            <TouchableOpacity
-                                onPress={() => setIsChatInfoVisible(false)}
-                            >
-                                <Ionicons name="close" size={22} color="#F9FAFB" />
+                <FlatList 
+                    ref={listRef} 
+                    data={messages} 
+                    renderItem={renderMessageItem} 
+                    keyExtractor={item => item.id} 
+                    contentContainerStyle={styles.listContent} 
+                    showsVerticalScrollIndicator={false}
+                />
+                
+                <View style={{ backgroundColor: COLORS.white }}>
+                    {editingMessageId && (
+                        <View style={styles.editBar}>
+                            <Feather name="edit-2" size={14} color={COLORS.primary} />
+                            <Text style={styles.editText} numberOfLines={1}>Editing message...</Text>
+                            <TouchableOpacity onPress={() => { setEditingMessageId(null); setInputText(""); }}>
+                                <Ionicons name="close-circle" size={20} color={COLORS.textMuted} />
                             </TouchableOpacity>
                         </View>
-
-                        {/* Основна інфа */}
-                        <View style={styles.chatInfoBody}>
-                            <Text style={styles.chatInfoLabel}>Event name</Text>
-                            <Text style={styles.chatInfoValue}>
-                                {name || "Event chat"}
-                            </Text>
-
-                            {!!subtitle && (
-                                <>
-                                    <Text style={styles.chatInfoLabel}>
-                                        Date & time
-                                    </Text>
-                                    <Text style={styles.chatInfoValue}>
-                                        {subtitle}
-                                    </Text>
-                                </>
-                            )}
-
-                            {typeof participantsCount === "number" && (
-                                <>
-                                    <Text style={styles.chatInfoLabel}>
-                                        Participants
-                                    </Text>
-                                    <Text style={styles.chatInfoValue}>
-                                        {participantsCount} participants
-                                    </Text>
-                                </>
-                            )}
-                        </View>
-
-                        {/* Кнопки дій */}
-                        <View style={styles.chatInfoActions}>
-                            <TouchableOpacity
-                                style={styles.chatInfoButtonDestructive}
-                                onPress={confirmClearChat}
-                            >
-                                <Text style={styles.chatInfoButtonDestructiveText}>
-                                    Clear chat
-                                </Text>
+                    )}
+                    <View style={styles.footerContainer}>
+                        <View style={styles.inputRow}>
+                            <TouchableOpacity style={styles.attachBtn}>
+                                <Feather name="image" size={22} color={COLORS.primary} />
                             </TouchableOpacity>
-
-                            <TouchableOpacity
-                                style={styles.chatInfoButton}
-                                onPress={() => setIsChatInfoVisible(false)}
-                            >
-                                <Text style={styles.chatInfoButtonText}>
-                                    Close
-                                </Text>
-                            </TouchableOpacity>
+                            <TextInput 
+                                style={styles.input} 
+                                placeholder="Message..." 
+                                value={inputText} 
+                                onChangeText={setInputText} 
+                                multiline 
+                            />
+                            {inputText.trim().length > 0 && (
+                                <TouchableOpacity style={styles.sendBtn} onPress={handleSendMessage}>
+                                    <Ionicons name={editingMessageId ? "checkmark" : "arrow-up"} size={22} color={COLORS.white} />
+                                </TouchableOpacity>
+                            )}
                         </View>
                     </View>
+                    <View style={{ height: insets.bottom, backgroundColor: COLORS.white }} />
+                </View>
+
+            </KeyboardAvoidingView>
+
+            {/* Modals */}
+            <Modal visible={isMenuVisible} transparent animationType="fade">
+                <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setIsMenuVisible(false)}>
+                    <View style={styles.menuCard}>
+                        {menuMessage?.type === 'text' && (
+                            <TouchableOpacity style={styles.menuItem} onPress={() => { Clipboard.setStringAsync(menuMessage?.text || ""); setIsMenuVisible(false); }}>
+                                <Text style={styles.menuText}>Copy</Text>
+                                <Feather name="copy" size={18} color={COLORS.textMain} />
+                            </TouchableOpacity>
+                        )}
+                        <TouchableOpacity style={[styles.menuItem, styles.menuBorder]} onPress={() => handlePinMessage(menuMessage)}>
+                            <Text style={styles.menuText}>Pin</Text>
+                            <Feather name="pin" size={18} color={COLORS.textMain} />
+                        </TouchableOpacity>
+                        {menuMessage?.userId === authUser?.uid && (
+                            <>
+                                {menuMessage?.type === 'text' && (
+                                    <TouchableOpacity style={[styles.menuItem, styles.menuBorder]} onPress={() => { setEditingMessageId(menuMessage.id); setInputText(menuMessage.text); setIsMenuVisible(false); }}>
+                                        <Text style={styles.menuText}>Edit</Text>
+                                        <Feather name="edit-3" size={18} color={COLORS.textMain} />
+                                    </TouchableOpacity>
+                                )}
+                                <TouchableOpacity style={[styles.menuItem, styles.menuBorder]} onPress={() => handleDeleteMessage(menuMessage.id)}>
+                                    <Text style={[styles.menuText, { color: COLORS.destructive }]}>Delete</Text>
+                                    <Feather name="trash-2" size={18} color={COLORS.destructive} />
+                                </TouchableOpacity>
+                            </>
+                        )}
+                    </View>
+                </TouchableOpacity>
+            </Modal>
+
+            <Modal visible={isPreviewVisible} transparent animationType="fade">
+                <View style={styles.previewContainer}>
+                    <TouchableOpacity style={styles.closePreview} onPress={() => setIsPreviewVisible(false)}>
+                        <Ionicons name="close-circle" size={32} color="#FFF" />
+                    </TouchableOpacity>
+                    <ImageZoom cropWidth={SCREEN_WIDTH} cropHeight={SCREEN_HEIGHT} imageWidth={SCREEN_WIDTH} imageHeight={SCREEN_HEIGHT}>
+                        <Image source={{ uri: previewImage || "" }} style={{ width: '100%', height: '100%' }} resizeMode="contain" />
+                    </ImageZoom>
                 </View>
             </Modal>
-        </KeyboardAvoidingView>
+        </View>
     );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: "#F9F9F9",
-    },
-    header: {
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "space-between",
-        paddingHorizontal: 16,
-        paddingTop: 70,
-        paddingBottom: 10,
-        borderBottomWidth: 0.5,
-        borderColor: "#E2E8F0",
-        backgroundColor: "#FFFFFF",
-    },
-    headerLeft: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 10,
-    },
-    headerIcon: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
-        backgroundColor: "#EEF2FF",
-        alignItems: "center",
-        justifyContent: "center",
-    },
-    headerTextBlock: {
-        flexDirection: "column",
-    },
-    eventTitle: {
-        fontSize: 16,
-        fontWeight: "600",
-        color: "#000",
-    },
-    eventSubtitle: {
-        fontSize: 13,
-        color: "#6E7D93",
-    },
-    participantsText: {
-        fontSize: 12,
-        color: "#6E7D93",
-        marginTop: 2,
-    },
-    messagesList: {
-        paddingHorizontal: 0,
+    mainContainer: { flex: 1, backgroundColor: COLORS.bg },
+    headerWrapper: { backgroundColor: COLORS.white, borderBottomWidth: 1, borderColor: COLORS.borderOther },
+    header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, height: 56 },
+    headerInfo: { flex: 1, alignItems: 'center' },
+    headerTitle: { fontSize: 17, fontWeight: "600", color: COLORS.textMain },
+    headerSubtitle: { fontSize: 11, color: COLORS.textMuted },
+    iconButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+    pinnedContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.white, paddingHorizontal: 16, paddingVertical: 8, borderBottomWidth: 1, borderColor: COLORS.borderOther },
+    pinnedLabel: { fontSize: 11, fontWeight: '700', color: COLORS.primary },
+    pinnedText: { fontSize: 13, color: COLORS.textMain },
+    listContent: { padding: 16, paddingBottom: 32 },
+    msgRow: { flexDirection: 'row', marginBottom: 12, alignItems: 'flex-end' },
+    rowMine: { justifyContent: 'flex-end' },
+    rowOther: { justifyContent: 'flex-start' },
+    avatarSmall: { width: 30, height: 30, borderRadius: 15, backgroundColor: COLORS.primary, alignItems: 'center', justifyContent: 'center', marginRight: 8 },
+    avatarTextSmall: { fontSize: 12, fontWeight: "700", color: "#FFF" },
+    bubble: { maxWidth: '80%', padding: 12, borderRadius: 20 },
+    bubbleMine: { backgroundColor: COLORS.bubbleMine, borderBottomRightRadius: 4 },
+    bubbleOther: { backgroundColor: COLORS.bubbleOther, borderBottomLeftRadius: 4, borderWidth: 1, borderColor: COLORS.borderOther },
+    bubbleImage: { padding: 4, borderRadius: 16 },
+    msgImage: { width: SCREEN_WIDTH * 0.7, height: SCREEN_WIDTH * 0.7, borderRadius: 14 },
+    authorName: { fontSize: 12, fontWeight: '600', color: COLORS.primary, marginBottom: 2 },
+    msgText: { fontSize: 15, color: COLORS.textMain },
+    msgFooter: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-end', marginTop: 4 },
+    msgTime: { fontSize: 10, color: COLORS.textMuted },
+    systemRow: { width: '100%', alignItems: 'center', marginVertical: 14 },
+    systemText: { fontSize: 10, fontWeight: '800', color: COLORS.textMuted, letterSpacing: 1.5, textAlign: 'center' },
+    
+    // Оновлений футтер
+    footerContainer: { 
+        backgroundColor: COLORS.white, 
+        borderTopWidth: 1, 
+        borderColor: COLORS.borderOther, 
+        paddingHorizontal: 12, 
         paddingTop: 12,
-        paddingBottom: 4,
-    },
-    systemRow: {
-        alignItems: "center",
-        marginVertical: 8,
-    },
-    systemBubble: {
-        paddingHorizontal: 12,
-        paddingVertical: 4,
-        borderRadius: 999,
-        backgroundColor: "#E5E7EB",
-    },
-    systemText: {
-        fontSize: 12,
-        color: "#4B5563",
-    },
-    messageRow: {
-        width: "100%",
-        flexDirection: "row",
-        alignItems: "flex-end",
-        marginBottom: 8,
-    },
-    messageRowMine: {
-        justifyContent: "flex-end",
-        paddingRight: 16,
-        paddingLeft: 60,
-    },
-    messageRowOther: {
-        justifyContent: "flex-start",
-        paddingLeft: 16,
-        paddingRight: 60,
-    },
-    myMessageWrapper: {
-        marginLeft: "auto",
-    },
-    avatar: {
-        width: 28,
-        height: 28,
-        borderRadius: 14,
-        backgroundColor: "#E2E8F0",
-        alignItems: "center",
-        justifyContent: "center",
-        marginRight: 4,
-    },
-    avatarText: {
-        fontSize: 14,
-        fontWeight: "600",
-        color: "#4A5568",
-    },
+        paddingBottom: 12,
+    },    inputRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: "#F1F5F9", borderRadius: 24, paddingHorizontal: 4 },
+    input: { flex: 1, paddingHorizontal: 12, fontSize: 16, maxHeight: 100, paddingVertical: 10 },
+    attachBtn: { padding: 10 },
+    sendBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: COLORS.primary, alignItems: 'center', justifyContent: 'center', marginRight: 4 },
+    bottomFill: { backgroundColor: COLORS.white, width: '100%' }, // Та сама біла заплатка
 
-    // текстові бульки
-    bubble: {
-        borderRadius: 18,
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-    },
-    bubbleMine: {
-        backgroundColor: "#505BEB",
-        borderBottomRightRadius: 4,
-    },
-    bubbleOther: {
-        backgroundColor: "#FFFFFF",
-        borderWidth: 0.5,
-        borderColor: "#E2E8F0",
-        borderBottomLeftRadius: 4,
-    },
-
-    // булька з фото
-    imageBubble: {
-        maxWidth: 260,
-        borderRadius: 18,
-        paddingHorizontal: 6,
-        paddingVertical: 6,
-    },
-
-    senderName: {
-        fontSize: 12,
-        color: "#6E7D93",
-        marginBottom: 2,
-    },
-    messageText: {
-        fontSize: 14,
-        color: "#111827",
-    },
-    messageTime: {
-        fontSize: 11,
-        color: "#A0AEC0",
-        alignSelf: "flex-end",
-        marginTop: 4,
-    },
-    imageMessage: {
-        width: 230,
-        height: 260,
-        borderRadius: 12,
-        marginTop: 2,
-    },
-    messageTimeImage: {
-        fontSize: 11,
-        color: "#A0AEC0",
-        alignSelf: "flex-end",
-        marginTop: 4,
-    },
-    inputBar: {
-        flexDirection: "row",
-        alignItems: "center",
-        paddingHorizontal: 12,
-        paddingVertical: 12,
-        borderTopWidth: 0.5,
-        borderColor: "#E2E8F0",
-        backgroundColor: "#FFFFFF",
-    },
-    inputContainer: {
-        flex: 1,
-        flexDirection: "row",
-        alignItems: "center",
-        backgroundColor: "#F3F4F6",
-        borderRadius: 999,
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-    },
-    attachBtn: {
-        marginRight: 6,
-    },
-    textInput: {
-        flex: 1,
-        fontSize: 14,
-        maxHeight: 80,
-    },
-    sendFab: {
-        marginLeft: 8,
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: "#505BEB",
-        alignItems: "center",
-        justifyContent: "center",
-    },
-    backButton: {
-        padding: 0,
-    },
-
-    previewBackdrop: {
-        flex: 1,
-        backgroundColor: "rgba(0,0,0,0.6)",
-        justifyContent: "center",
-        alignItems: "center",
-    },
-    previewContent: {
-        width: "90%",
-        height: "80%",
-        backgroundColor: "#FFFFFF",
-        borderRadius: 20,
-        padding: 12,
-    },
-    previewHeader: {
-        flexDirection: "row",
-        justifyContent: "space-between",
-        alignItems: "center",
-        marginBottom: 8,
-    },
-    previewImage: {
-        flex: 1,
-        borderRadius: 16,
-    },
-
-    pinnedLabel: {
-        fontSize: 10,
-        color: "#FBBF24",
-        marginBottom: 2,
-        textTransform: "uppercase",
-    },
-    pinnedBar: {
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        backgroundColor: "rgba(131,238,110,0.3)",
-        flexDirection: "row",
-        alignItems: "center",
-    },
-    pinnedBarLeft: {
-        flexDirection: "row",
-        alignItems: "center",
-        flex: 1,
-    },
-    pinnedBarTextBox: {
-        flexShrink: 1,
-    },
-    pinnedBarTitle: {
-        fontSize: 12,
-        color: "#134b01",
-        marginBottom: 2,
-        fontWeight: "600",
-    },
-    pinnedBarPreview: {
-        fontSize: 12,
-        color: "#49793d",
-    },
-
-    editBar: {
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        backgroundColor: "#1F2937",
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "space-between",
-    },
-    editBarLeft: {
-        flexDirection: "row",
-        alignItems: "center",
-        flex: 1,
-    },
-    editBarTextBox: {
-        flexShrink: 1,
-    },
-    editBarTitle: {
-        fontSize: 12,
-        color: "#7ea3e5",
-        fontWeight: "600",
-        marginBottom: 2,
-    },
-    editBarPreview: {
-        fontSize: 12,
-        color: "#E5E7EB",
-    },
-
-    menuBackdrop: {
-        flex: 1,
-        backgroundColor: "rgba(0,0,0,0.4)",
-        justifyContent: "center",
-        alignItems: "center",
-    },
-    menuContainer: {
-        width: "70%",
-        backgroundColor: "#2C2533",
-        borderRadius: 16,
-        paddingVertical: 8,
-        overflow: "hidden",
-    },
-    menuItem: {
-        paddingVertical: 10,
-        paddingHorizontal: 16,
-        borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: "rgba(255,255,255,0.08)",
-    },
-    menuItemText: {
-        color: "#F9FAFB",
-        fontSize: 14,
-    },
-    menuItemDestructive: {
-        backgroundColor: "#3B1F26",
-    },
-    menuItemDestructiveText: {
-        color: "#FCA5A5",
-        fontSize: 14,
-    },
-    menuItemCancel: {
-        borderBottomWidth: 0,
-        marginTop: 4,
-    },
-
-    chatInfoContainer: {
-        width: "85%",
-        backgroundColor: "#111827",
-        borderRadius: 18,
-        paddingVertical: 14,
-        paddingHorizontal: 16,
-    },
-    chatInfoHeader: {
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "space-between",
-        marginBottom: 10,
-    },
-    chatInfoTitle: {
-        color: "#F9FAFB",
-        fontSize: 16,
-        fontWeight: "600",
-    },
-    chatInfoBody: {
-        marginBottom: 14,
-    },
-    chatInfoLabel: {
-        fontSize: 12,
-        color: "#9CA3AF",
-        marginTop: 6,
-    },
-    chatInfoValue: {
-        fontSize: 14,
-        color: "#E5E7EB",
-        marginTop: 2,
-    },
-    chatInfoActions: {
-        borderTopWidth: StyleSheet.hairlineWidth,
-        borderTopColor: "rgba(249,250,251,0.08)",
-        paddingTop: 10,
-        gap: 8,
-    },
-    chatInfoButton: {
-        paddingVertical: 10,
-        borderRadius: 999,
-        backgroundColor: "#374151",
-        alignItems: "center",
-        justifyContent: "center",
-    },
-    chatInfoButtonText: {
-        color: "#F9FAFB",
-        fontSize: 14,
-        fontWeight: "500",
-    },
-    chatInfoButtonDestructive: {
-        paddingVertical: 10,
-        borderRadius: 999,
-        backgroundColor: "#7F1D1D",
-        alignItems: "center",
-        justifyContent: "center",
-    },
-    chatInfoButtonDestructiveText: {
-        color: "#FCA5A5",
-        fontSize: 14,
-        fontWeight: "600",
-    },
+    editBar: { flexDirection: 'row', alignItems: 'center', paddingBottom: 8, paddingHorizontal: 12 },
+    editText: { flex: 1, fontSize: 12, color: COLORS.textMuted, marginLeft: 8 },
+    modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: 'center', alignItems: 'center' },
+    menuCard: { width: '70%', backgroundColor: COLORS.white, borderRadius: 16, overflow: 'hidden' },
+    menuItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16 },
+    menuBorder: { borderTopWidth: 1, borderColor: '#F1F5F9' },
+    menuText: { fontSize: 16, color: COLORS.textMain },
+    previewContainer: { flex: 1, backgroundColor: "#000", justifyContent: 'center' },
+    closePreview: { position: 'absolute', top: 50, left: 20, zIndex: 10 },
 });

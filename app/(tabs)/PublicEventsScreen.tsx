@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { 
     View, Text, StyleSheet, FlatList, TouchableOpacity, 
-    ScrollView, Platform, SafeAreaView, StatusBar 
+    ScrollView, Platform, StatusBar, ActivityIndicator
 } from "react-native";
 import * as Haptics from 'expo-haptics';
 import { collection, onSnapshot, query, where, orderBy, updateDoc, doc, arrayUnion, arrayRemove } from "firebase/firestore";
@@ -9,26 +9,25 @@ import { getAuth } from "firebase/auth";
 import { db } from "../../FirebaseConfig";
 import { EVENT_CATEGORIES } from "../../utils/categories";
 import { EventFull } from "../../utils/types";
-import EventCard from "@/components/events/EventCard"; // Імпортуємо наш новий компонент
+import { SafeAreaView } from "react-native-safe-area-context";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 
-const CategoryChip = ({ label, isActive, onPress }: { label: string, isActive: boolean, onPress: () => void }) => (
-    <TouchableOpacity
-        activeOpacity={0.8}
-        onPress={() => {
-            if (Platform.OS === 'ios') Haptics.selectionAsync();
-            onPress();
-        }}
-        style={[styles.chip, isActive && styles.chipActive]}
-    >
-        <Text style={[styles.chipText, isActive && styles.chipTextActive]}>
-            {label === "All" ? "🌐 " : ""}{label}
-        </Text>
-    </TouchableOpacity>
-);
+import EventCard from "@/components/events/EventCard"; 
+
+// Оновлена палітра під твій акцент #505BEB
+const COLORS = {
+  primary: "#505BEB", 
+  primaryContainer: "rgba(80, 91, 235, 0.1)", // Світлий відтінок для фону кнопок/чіпів
+  surface: "#F8FAFC", // Чистий світлий фон, як на HomeScreen
+  onSurface: "#1A1A1A",
+  outline: "#64748B",
+  white: "#FFFFFF",
+};
 
 export default function PublicEventsScreen() {
     const [events, setEvents] = useState<EventFull[]>([]);
     const [activeCategory, setActiveCategory] = useState("All");
+    const [loading, setLoading] = useState(true);
     const uid = getAuth().currentUser?.uid;
 
     useEffect(() => {
@@ -37,14 +36,16 @@ export default function PublicEventsScreen() {
             where("isPublic", "==", true),
             orderBy("date", "asc")
         );
-        return onSnapshot(q, (snap) => {
+        const unsubscribe = onSnapshot(q, (snap) => {
             const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as EventFull));
             setEvents(list);
+            setLoading(false);
         });
+        return unsubscribe;
     }, []);
 
     const filteredEvents = useMemo(() => {
-        const todayStr = new Date().toLocaleDateString('sv-SE'); 
+        const todayStr = new Date().toISOString().split('T')[0]; 
         return events.filter(e => {
             if (e.date < todayStr) return false;
             if (activeCategory !== "All" && e.category !== activeCategory) return false;
@@ -65,82 +66,213 @@ export default function PublicEventsScreen() {
                 acceptedUserIds: joined ? arrayRemove(uid) : arrayUnion(uid),
             });
         } catch (e) {
-            console.error("Error updating join status", e);
+            console.error("Join error", e);
         }
     };
 
     return (
-        <SafeAreaView style={styles.safeArea}>
+        <SafeAreaView style={styles.safeArea} edges={['top']}>
             <StatusBar barStyle="dark-content" />
-            <View style={styles.container}>
-                <View style={styles.header}>
-                    <Text style={styles.title}>Discover</Text>
-                    <Text style={styles.subtitle}>Events near you</Text>
+            
+            {/* Header Area */}
+            <View style={styles.header}>
+                <View>
+                    <Text style={styles.overtitle}>Discovery</Text>
+                    <Text style={styles.title}>Find your vibe</Text>
                 </View>
-                
-                <View style={styles.filterSection}>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsContent}>
-                        {["All", ...EVENT_CATEGORIES].map((cat) => (
-                            <CategoryChip 
-                                key={cat} 
-                                label={cat} 
-                                isActive={activeCategory === cat} 
-                                onPress={() => setActiveCategory(cat)} 
-                            />
-                        ))}
-                    </ScrollView>
-                </View>
+                <TouchableOpacity style={styles.filterBtn}>
+                    <MaterialCommunityIcons name="tune-variant" size={22} color={COLORS.primary} />
+                </TouchableOpacity>
+            </View>
 
+            {/* Horizontal Categories */}
+            <View style={styles.filterSection}>
+                <ScrollView 
+                    horizontal 
+                    showsHorizontalScrollIndicator={false} 
+                    contentContainerStyle={styles.chipsContent}
+                >
+                    {["All", ...EVENT_CATEGORIES].map((cat) => (
+                        <TouchableOpacity
+                            key={cat}
+                            onPress={() => {
+                                setActiveCategory(cat);
+                                Haptics.selectionAsync();
+                            }}
+                            style={[
+                                styles.chip, 
+                                activeCategory === cat && styles.chipActive
+                            ]}
+                        >
+                            {cat === "All" && (
+                                <MaterialCommunityIcons 
+                                    name="earth" 
+                                    size={16} 
+                                    color={activeCategory === cat ? COLORS.white : COLORS.primary} 
+                                    style={{ marginRight: 6 }}
+                                />
+                            )}
+                            <Text style={[
+                                styles.chipText, 
+                                activeCategory === cat && styles.chipTextActive
+                            ]}>
+                                {cat}
+                            </Text>
+                        </TouchableOpacity>
+                    ))}
+                </ScrollView>
+            </View>
+
+            {/* Events List */}
+            {loading ? (
+                <View style={styles.center}>
+                    <ActivityIndicator size="large" color={COLORS.primary} />
+                </View>
+            ) : (
                 <FlatList
                     data={filteredEvents}
                     keyExtractor={(item) => item.id}
                     renderItem={({ item }) => (
-                        <EventCard 
-                            item={item} 
-                            uid={uid || ""} 
-                            mode="discover"
-                            onJoinToggle={handleJoinToggle}
-                        />
+                        <View style={styles.cardWrapper}>
+                            <EventCard 
+                                item={item} 
+                                uid={uid || ""} 
+                                mode="discover"
+                                onJoinToggle={handleJoinToggle}
+                            />
+                        </View>
                     )}
                     contentContainerStyle={styles.listContent}
                     showsVerticalScrollIndicator={false}
                     ListEmptyComponent={
                         <View style={styles.emptyContainer}>
-                            <Text style={styles.emptyEmoji}>🕵️‍♂️</Text>
-                            <Text style={styles.emptyText}>No upcoming events found</Text>
+                            <View style={styles.emptyIconCircle}>
+                                <MaterialCommunityIcons name="map-marker-off-outline" size={48} color={COLORS.outline} />
+                            </View>
+                            <Text style={styles.emptyText}>No events in this category yet</Text>
+                            <TouchableOpacity 
+                                style={styles.resetBtn} 
+                                onPress={() => setActiveCategory("All")}
+                            >
+                                <Text style={styles.resetBtnText}>Show all events</Text>
+                            </TouchableOpacity>
                         </View>
                     }
                 />
-            </View>
+            )}
         </SafeAreaView>
     );
 }
 
 const styles = StyleSheet.create({
-    safeArea: { flex: 1, backgroundColor: "#FFFFFF" },
-    container: { flex: 1, backgroundColor: "#FDFDFD" },
-    header: { paddingHorizontal: 24, paddingTop: 16, marginBottom: 8 },
-    title: { fontSize: 34, fontWeight: "900", color: "#1A1A1A", letterSpacing: -1 },
-    subtitle: { fontSize: 16, color: "#8E8E93", marginTop: 2 },
-    
-    filterSection: { marginBottom: 16 },
-    chipsContent: { paddingHorizontal: 20, paddingVertical: 10 },
-    chip: { 
-        paddingHorizontal: 16, 
-        height: 38, 
-        borderRadius: 12, 
-        backgroundColor: "#F2F2F7", 
-        marginRight: 8, 
-        justifyContent: "center",
-        borderWidth: 1,
-        borderColor: "#E5E5EA"
+    safeArea: { 
+        flex: 1, 
+        backgroundColor: COLORS.surface 
     },
-    chipActive: { backgroundColor: "#1A1A1A", borderColor: "#1A1A1A" },
-    chipText: { fontSize: 14, fontWeight: "600", color: "#3A3A3C" },
-    chipTextActive: { color: "#FFF" },
-
-    listContent: { paddingHorizontal: 4, paddingBottom: 40 }, 
-    emptyContainer: { alignItems: 'center', marginTop: 100 },
-    emptyEmoji: { fontSize: 50, marginBottom: 10 },
-    emptyText: { fontSize: 16, color: '#8E8E93', fontWeight: '500' },
+    header: { 
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingHorizontal: 24, 
+        paddingTop: 10, 
+        marginBottom: 15 
+    },
+    overtitle: {
+        fontSize: 12,
+        fontWeight: '800',
+        color: COLORS.primary,
+        textTransform: 'uppercase',
+        letterSpacing: 1.5,
+        marginBottom: 2
+    },
+    title: { 
+        fontSize: 32, 
+        fontWeight: "900", 
+        color: COLORS.onSurface, 
+        letterSpacing: -1 
+    },
+    filterBtn: {
+        backgroundColor: COLORS.primaryContainer,
+        padding: 12,
+        borderRadius: 16,
+    },
+    filterSection: { 
+        marginBottom: 10 
+    },
+    chipsContent: { 
+        paddingHorizontal: 20, 
+        paddingVertical: 5,
+        gap: 8 
+    },
+    chip: { 
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 16, 
+        height: 44, 
+        borderRadius: 22, 
+        backgroundColor: COLORS.white, 
+        borderWidth: 1,
+        borderColor: COLORS.primaryContainer,
+        elevation: 2,
+        shadowColor: COLORS.primary,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 5,
+    },
+    chipActive: { 
+        backgroundColor: COLORS.primary, 
+        borderColor: COLORS.primary 
+    },
+    chipText: { 
+        fontSize: 14, 
+        fontWeight: "700", 
+        color: COLORS.outline 
+    },
+    chipTextActive: { 
+        color: COLORS.white 
+    },
+    listContent: { 
+        paddingBottom: 40,
+        paddingTop: 10 
+    }, 
+    cardWrapper: {
+        marginBottom: 8,
+    },
+    center: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center'
+    },
+    emptyContainer: { 
+        alignItems: 'center', 
+        marginTop: 60,
+        paddingHorizontal: 40 
+    },
+    emptyIconCircle: {
+        width: 100,
+        height: 100,
+        borderRadius: 50,
+        backgroundColor: COLORS.primaryContainer,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginBottom: 20
+    },
+    emptyText: { 
+        fontSize: 16, 
+        color: COLORS.outline, 
+        fontWeight: '600',
+        textAlign: 'center',
+        lineHeight: 24,
+        marginBottom: 20
+    },
+    resetBtn: {
+        paddingVertical: 12,
+        paddingHorizontal: 24,
+        borderRadius: 20,
+        backgroundColor: COLORS.primaryContainer
+    },
+    resetBtnText: {
+        color: COLORS.primary,
+        fontWeight: '700'
+    }
 });

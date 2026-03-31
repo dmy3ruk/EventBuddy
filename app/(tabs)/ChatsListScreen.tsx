@@ -1,4 +1,3 @@
-// app/(tabs)/ChatsListScreen.tsx
 import React, { useEffect, useState, useMemo } from "react";
 import {
     View,
@@ -6,6 +5,10 @@ import {
     TouchableOpacity,
     FlatList,
     StyleSheet,
+    ActivityIndicator,
+    Platform,
+    StatusBar,
+    TextInput,
 } from "react-native";
 import { getAuth } from "firebase/auth";
 import {
@@ -13,14 +16,15 @@ import {
     onSnapshot,
     query,
     where,
-    DocumentData,
     doc,
     getDoc,
     orderBy,
 } from "firebase/firestore";
 import { db } from "../../FirebaseConfig";
 import { useNavigation } from "@react-navigation/native";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { SafeAreaView } from "react-native-safe-area-context";
+import * as Haptics from 'expo-haptics';
 
 type EventChatItem = {
     id: string;
@@ -32,173 +36,102 @@ type EventChatItem = {
     acceptedUserIds?: string[];
 };
 
+const COLORS = {
+    primary: "#505BEB",
+    primaryContainer: "rgba(80, 91, 235, 0.1)",
+    surface: "#F8FAFC",
+    onSurface: "#1A1A1A",
+    outline: "#64748B",
+    white: "#FFFFFF",
+    success: "#16A34A",
+    cardBg: "#FFFFFF",
+};
+
 export default function ChatsListScreen() {
     const [ownerEvents, setOwnerEvents] = useState<EventChatItem[]>([]);
     const [acceptedEvents, setAcceptedEvents] = useState<EventChatItem[]>([]);
     const [unreadByEvent, setUnreadByEvent] = useState<Record<string, boolean>>({});
     const [showArchived, setShowArchived] = useState(false);
+    const [loading, setLoading] = useState(true);
+    
+    // Пошук
+    const [searchQuery, setSearchQuery] = useState("");
+    const [isSearching, setIsSearching] = useState(false);
 
     const auth = getAuth();
     const user = auth.currentUser;
     const navigation = useNavigation<any>();
 
-    // ---------- MY EVENTS ----------
     useEffect(() => {
         if (!user) return;
-
-        const qOwner = query(
-            collection(db, "events"),
-            where("userId", "==", user.uid)
-        );
-
+        const qOwner = query(collection(db, "events"), where("userId", "==", user.uid));
         return onSnapshot(qOwner, (snapshot) => {
-            const data: EventChatItem[] = snapshot.docs.map((docSnap) => {
-                const d = docSnap.data() as DocumentData;
-                return {
-                    id: docSnap.id,
-                    name: d.name ?? "",
-                    date: d.date ?? "",
-                    time: d.time ?? "",
-                    userId: d.userId ?? "",
-                    invitedUserIds: d.invitedUserIds ?? [],
-                    acceptedUserIds: d.acceptedUserIds ?? [],
-                };
-            });
-            setOwnerEvents(data);
+            setOwnerEvents(snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as EventChatItem)));
+            setLoading(false);
         });
     }, [user]);
 
-    // ---------- ACCEPTED EVENTS ----------
     useEffect(() => {
         if (!user) return;
-
-        const qAccepted = query(
-            collection(db, "events"),
-            where("acceptedUserIds", "array-contains", user.uid)
-        );
-
+        const qAccepted = query(collection(db, "events"), where("acceptedUserIds", "array-contains", user.uid));
         return onSnapshot(qAccepted, (snapshot) => {
-            const data: EventChatItem[] = snapshot.docs.map((docSnap) => {
-                const d = docSnap.data() as DocumentData;
-                return {
-                    id: docSnap.id,
-                    name: d.name ?? "",
-                    date: d.date ?? "",
-                    time: d.time ?? "",
-                    userId: d.userId ?? "",
-                    invitedUserIds: d.invitedUserIds ?? [],
-                    acceptedUserIds: d.acceptedUserIds ?? [],
-                };
-            });
-            setAcceptedEvents(data);
+            setAcceptedEvents(snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as EventChatItem)));
         });
     }, [user]);
 
-    // ---------- MERGED EVENTS ----------
     const chats = useMemo(() => {
         const map = new Map<string, EventChatItem>();
+        [...ownerEvents, ...acceptedEvents].forEach((ev) => map.set(ev.id, ev));
+        let merged = Array.from(map.values()).filter(ev => ev.userId === user?.uid || ev.acceptedUserIds?.includes(user?.uid || ""));
+        
+        // Фільтрація за пошуковим запитом
+        if (searchQuery.trim().length > 0) {
+            merged = merged.filter(chat => 
+                chat.name.toLowerCase().includes(searchQuery.toLowerCase())
+            );
+        }
 
-        [...ownerEvents, ...acceptedEvents].forEach((ev) => {
-            map.set(ev.id, ev);
-        });
-
-        let merged = Array.from(map.values());
-
-        merged = merged.filter(ev => {
-            const amIOwner = ev.userId === user?.uid;
-            const amIAccepted = ev.acceptedUserIds?.includes(user?.uid || "");
-
-            return amIOwner || amIAccepted;
-        });
-
-        merged.sort((a, b) => {
-            if (!a.date || !b.date) return 0;
-            return new Date(b.date).getTime() - new Date(a.date).getTime();
-        });
-
+        merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
         return merged;
-    }, [ownerEvents, acceptedEvents]);
+    }, [ownerEvents, acceptedEvents, user, searchQuery]);
 
-    // ---------- SPLIT ACTIVE / ARCHIVED ----------
     const { activeChats, archivedChats } = useMemo(() => {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-
+        const today = new Date().setHours(0, 0, 0, 0);
         const active: EventChatItem[] = [];
         const archived: EventChatItem[] = [];
-
         chats.forEach(ev => {
-            const evDate = new Date(ev.date);
-            evDate.setHours(0, 0, 0, 0);
-
+            const evDate = new Date(ev.date).setHours(0, 0, 0, 0);
             if (evDate >= today) active.push(ev);
             else archived.push(ev);
         });
-
         return { activeChats: active, archivedChats: archived };
     }, [chats]);
 
-    // ---------- UNREAD ----------
     useEffect(() => {
         if (!user) return;
-
         let unsubs: (() => void)[] = [];
-        const list = [...activeChats, ...archivedChats];
-
-        list.forEach((chat) => {
-            const qMsgs = query(
-                collection(db, "events", chat.id, "messages"),
-                orderBy("createdAt", "desc")
-            );
-
+        [...activeChats, ...archivedChats].forEach((chat) => {
+            const qMsgs = query(collection(db, "events", chat.id, "messages"), orderBy("createdAt", "desc"));
             const unsub = onSnapshot(qMsgs, async (msgSnap) => {
-                const statusRef = doc(
-                    db,
-                    "users",
-                    user.uid,
-                    "chatStatus",
-                    chat.id
-                );
-                const statusSnap = await getDoc(statusRef);
-                const lastRead = statusSnap.exists()
-                    ? statusSnap.data().lastRead
-                    : null;
-
+                const statusSnap = await getDoc(doc(db, "users", user.uid, "chatStatus", chat.id));
+                const lastRead = statusSnap.exists() ? statusSnap.data().lastRead : null;
                 let unread = false;
-
                 msgSnap.forEach((m) => {
                     const data: any = m.data();
-                    if (!data.createdAt) return;
-
-                    if (data.userId === user.uid) return;
-
-                    const createdMs = data.createdAt.toMillis
-                        ? data.createdAt.toMillis()
-                        : new Date(data.createdAt).getTime();
-
-                    const lastReadMs = lastRead?.toMillis
-                        ? lastRead.toMillis()
-                        : lastRead
-                            ? new Date(lastRead).getTime()
-                            : 0;
-
+                    if (!data.createdAt || data.userId === user.uid) return;
+                    const createdMs = data.createdAt.toMillis ? data.createdAt.toMillis() : new Date(data.createdAt).getTime();
+                    const lastReadMs = lastRead?.toMillis ? lastRead.toMillis() : lastRead ? new Date(lastRead).getTime() : 0;
                     if (!lastRead || createdMs > lastReadMs) unread = true;
                 });
-
-                setUnreadByEvent((prev) => ({
-                    ...prev,
-                    [chat.id]: unread,
-                }));
+                setUnreadByEvent(prev => ({ ...prev, [chat.id]: unread }));
             });
-
             unsubs.push(unsub);
         });
-
-        return () => unsubs.forEach((fn) => fn());
+        return () => unsubs.forEach(fn => fn());
     }, [activeChats, archivedChats, user]);
 
-    // ---------- OPEN CHAT ----------
     const openChat = (event: EventChatItem) => {
+        if (Platform.OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         navigation.navigate("Chat", {
             eventId: event.id,
             name: event.name,
@@ -208,218 +141,194 @@ export default function ChatsListScreen() {
         });
     };
 
-    // ---------- RENDER ITEM ----------
-    const renderItem = ({ item }: { item: EventChatItem }) => {
-        const hasUnread = unreadByEvent[item.id];
-        const initial = item.name?.trim()?.[0]?.toUpperCase() || "E";
-
-        return (
-            <TouchableOpacity
-                style={[styles.item, hasUnread && styles.itemUnread]}
-                onPress={() => openChat(item)}
-                activeOpacity={0.85}
-            >
-                <View style={styles.avatar}>
-                    <Text style={styles.avatarText}>{initial}</Text>
-                </View>
-
-                <View style={styles.content}>
-                    <View style={styles.topRow}>
-                        <Text style={styles.eventName} numberOfLines={1}>
-                            {item.name}
-                        </Text>
-                        <Text style={styles.timeText}>{item.time}</Text>
-                    </View>
-
-                    <View style={styles.bottomRow}>
-                        <Text style={styles.eventDate}>{item.date}</Text>
-                        {hasUnread && <View style={styles.chatBadge} />}
-                    </View>
-                </View>
-            </TouchableOpacity>
-        );
+    const handleSwitch = (archived: boolean) => {
+        if (Platform.OS === 'ios') Haptics.selectionAsync();
+        setShowArchived(archived);
     };
 
-    // --------------------------------------------------
+    const toggleSearch = () => {
+        setIsSearching(!isSearching);
+        if (isSearching) setSearchQuery("");
+    };
 
     return (
-        <View style={styles.container}>
-            {/* HEADER */}
+        <SafeAreaView style={styles.safeArea} edges={['top']}>
+            <StatusBar barStyle="dark-content" />
+            
             <View style={styles.header}>
-                <TouchableOpacity
-                    onPress={() => navigation.navigate("Home")}
-                    style={styles.backButton}
-                    hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
-                >
-                    <Ionicons name="chevron-back" size={30} color="#111" />
-                </TouchableOpacity>
-
-                <Text style={styles.headerTitle}>Chats</Text>
-
-                <View style={{ width: 30 }} />
+                {!isSearching ? (
+                    <>
+                        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+                            <Ionicons name="chevron-back" size={24} color={COLORS.onSurface} />
+                        </TouchableOpacity>
+                        <Text style={styles.headerTitle}>Messages</Text>
+                        <TouchableOpacity style={styles.headerIcon} onPress={toggleSearch}>
+                            <MaterialCommunityIcons name="comment-search-outline" size={24} color={COLORS.primary} />
+                        </TouchableOpacity>
+                    </>
+                ) : (
+                    <View style={styles.searchContainer}>
+                        <View style={styles.searchInputWrapper}>
+                            <Ionicons name="search" size={20} color={COLORS.outline} style={{ marginRight: 8 }} />
+                            <TextInput
+                                style={styles.searchInput}
+                                placeholder="Search chats..."
+                                value={searchQuery}
+                                onChangeText={setSearchQuery}
+                                autoFocus
+                            />
+                            {searchQuery.length > 0 && (
+                                <TouchableOpacity onPress={() => setSearchQuery("")}>
+                                    <Ionicons name="close-circle" size={18} color={COLORS.outline} />
+                                </TouchableOpacity>
+                            )}
+                        </View>
+                        <TouchableOpacity onPress={toggleSearch} style={styles.cancelBtn}>
+                            <Text style={styles.cancelText}>Cancel</Text>
+                        </TouchableOpacity>
+                    </View>
+                )}
             </View>
 
-            {/* SWITCH ACTIVE / ARCHIVED */}
-            <View style={styles.switchRow}>
-                <TouchableOpacity
-                    style={[styles.switchBtn, !showArchived && styles.switchActive]}
-                    onPress={() => setShowArchived(false)}
+            <View style={styles.tabContainer}>
+                <TouchableOpacity 
+                    onPress={() => handleSwitch(false)}
+                    style={[styles.tab, !showArchived && styles.tabActive]}
                 >
-                    <Text
-                        style={[
-                            styles.switchText,
-                            !showArchived && styles.switchTextActive,
-                        ]}
-                    >
-                        Active
-                    </Text>
+                    <Text style={[styles.tabText, !showArchived && styles.tabTextActive]}>Active</Text>
                 </TouchableOpacity>
-
-                <TouchableOpacity
-                    style={[styles.switchBtn, showArchived && styles.switchActive]}
-                    onPress={() => setShowArchived(true)}
+                <TouchableOpacity 
+                    onPress={() => handleSwitch(true)}
+                    style={[styles.tab, showArchived && styles.tabActive]}
                 >
-                    <Text
-                        style={[
-                            styles.switchText,
-                            showArchived && styles.switchTextActive,
-                        ]}
-                    >
-                        Archived
-                    </Text>
+                    <Text style={[styles.tabText, showArchived && styles.tabTextActive]}>Archived</Text>
                 </TouchableOpacity>
             </View>
 
-            {/* LIST */}
-            <FlatList
-                data={showArchived ? archivedChats : activeChats}
-                keyExtractor={(item) => item.id}
-                renderItem={renderItem}
-                ListEmptyComponent={
-                    <Text style={styles.empty}>
-                        {showArchived
-                            ? "No archived chats"
-                            : "You don't have any chats yet"}
-                    </Text>
-                }
-                contentContainerStyle={{ paddingBottom: 24 }}
-                showsVerticalScrollIndicator={false}
-            />
-        </View>
+            {loading ? (
+                <View style={styles.center}><ActivityIndicator color={COLORS.primary} /></View>
+            ) : (
+                <FlatList
+                    data={showArchived ? archivedChats : activeChats}
+                    keyExtractor={(item) => item.id}
+                    contentContainerStyle={styles.listContent}
+                    showsVerticalScrollIndicator={false}
+                    renderItem={({ item }) => {
+                        const hasUnread = unreadByEvent[item.id];
+                        return (
+                            <TouchableOpacity 
+                                style={[styles.chatCard, hasUnread && styles.unreadCard]} 
+                                onPress={() => openChat(item)}
+                            >
+                                <View style={[styles.avatar, { backgroundColor: COLORS.primaryContainer }]}>
+                                    <Text style={styles.avatarText}>{item.name[0].toUpperCase()}</Text>
+                                </View>
+
+                                <View style={styles.chatInfo}>
+                                    <View style={styles.infoTop}>
+                                        <Text style={styles.chatName} numberOfLines={1}>{item.name}</Text>
+                                        <Text style={styles.chatTime}>{item.time}</Text>
+                                    </View>
+                                    <View style={styles.infoBottom}>
+                                        <Text style={styles.chatDate}>{item.date}</Text>
+                                        {hasUnread && <View style={styles.unreadDot} />}
+                                    </View>
+                                </View>
+                            </TouchableOpacity>
+                        );
+                    }}
+                    ListEmptyComponent={
+                        <View style={styles.emptyContainer}>
+                            <MaterialCommunityIcons name="message-off-outline" size={60} color={COLORS.outline} />
+                            <Text style={styles.emptyText}>
+                                {searchQuery 
+                                    ? "No chats match your search" 
+                                    : showArchived ? "No old memories here" : "No active chats found"}
+                            </Text>
+                        </View>
+                    }
+                />
+            )}
+        </SafeAreaView>
     );
 }
 
-// ---------- STYLES ----------
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        paddingHorizontal: 14,
-        paddingTop: 20,
-        backgroundColor: "#F3F4F6",
-        marginTop: 30,
-    },
-
+    safeArea: { flex: 1, backgroundColor: COLORS.surface },
     header: {
-        flexDirection: "row",
-        alignItems: "center",
-        marginBottom: 10,
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingHorizontal: 20,
+        paddingVertical: 15,
+        minHeight: 70,
     },
-
-    backButton: { padding: 6, borderRadius: 999 },
-    headerTitle: {
+    headerTitle: { fontSize: 24, fontWeight: "800", color: COLORS.onSurface, letterSpacing: -0.5 },
+    backBtn: { padding: 8, backgroundColor: COLORS.white, borderRadius: 12, elevation: 2 },
+    headerIcon: { padding: 8 },
+    
+    // Search styles
+    searchContainer: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+    searchInputWrapper: {
         flex: 1,
-        textAlign: "center",
-        fontSize: 20,
-        fontWeight: "700",
-        color: "#111",
-    },
-
-    switchRow: {
-        flexDirection: "row",
-        justifyContent: "center",
-        marginBottom: 14,
-        gap: 8,
-    },
-    switchBtn: {
-        paddingHorizontal: 18,
-        paddingVertical: 8,
-        borderRadius: 20,
-        backgroundColor: "#E5E7EB",
-    },
-    switchActive: { backgroundColor: "#505BEB" },
-    switchText: { color: "#4B5563", fontWeight: "600" },
-    switchTextActive: { color: "#fff" },
-
-    item: {
-        flexDirection: "row",
-        alignItems: "center",
-        backgroundColor: "#fff",
-        paddingVertical: 12,
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: "rgba(0,0,0,0.05)",
         paddingHorizontal: 12,
+        borderRadius: 12,
+        height: 45,
+    },
+    searchInput: { flex: 1, fontSize: 16, color: COLORS.onSurface, paddingVertical: 0 },
+    cancelBtn: { marginLeft: 12 },
+    cancelText: { color: COLORS.primary, fontWeight: "600", fontSize: 16 },
+
+    tabContainer: {
+        flexDirection: 'row',
+        backgroundColor: "rgba(0,0,0,0.05)",
+        marginHorizontal: 20,
+        padding: 4,
         borderRadius: 16,
-        marginBottom: 8,
-        borderWidth: 0.5,
-        borderColor: "#E5E7EB",
+        marginBottom: 20,
+    },
+    tab: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 12 },
+    tabActive: { backgroundColor: COLORS.white, elevation: 2, shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 4 },
+    tabText: { fontSize: 14, fontWeight: "700", color: COLORS.outline },
+    tabTextActive: { color: COLORS.primary },
+    listContent: { paddingHorizontal: 20, paddingBottom: 40 },
+    chatCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: COLORS.cardBg,
+        padding: 14,
+        borderRadius: 20,
+        marginBottom: 12,
+        elevation: 2,
         shadowColor: "#000",
         shadowOpacity: 0.04,
-        shadowOffset: { width: 0, height: 2 },
-        shadowRadius: 6,
-        elevation: 1,
+        shadowRadius: 8,
+        shadowOffset: { width: 0, height: 2 }
     },
-    itemUnread: {
-        borderColor: "#C7D2FE",
-        backgroundColor: "#F8FAFF",
+    unreadCard: {
+        borderLeftWidth: 4,
+        borderLeftColor: COLORS.primary,
+        backgroundColor: "#F0F2FF"
     },
-
     avatar: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        backgroundColor: "#E0E7FF",
-        justifyContent: "center",
-        alignItems: "center",
-        marginRight: 12,
+        width: 54,
+        height: 54,
+        borderRadius: 18,
+        justifyContent: 'center',
+        alignItems: 'center',
     },
-    avatarText: {
-        fontSize: 18,
-        fontWeight: "800",
-        color: "#505BEB",
-    },
-
-    content: { flex: 1, gap: 4 },
-
-    topRow: {
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "space-between",
-    },
-
-    bottomRow: {
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "space-between",
-    },
-
-    eventName: {
-        fontSize: 16,
-        fontWeight: "700",
-        color: "#111",
-        flex: 1,
-    },
-    timeText: { fontSize: 12, color: "#9CA3AF", fontWeight: "600" },
-    eventDate: { fontSize: 13, color: "#6E7D93", fontWeight: "500" },
-
-    chatBadge: {
-        width: 10,
-        height: 10,
-        borderRadius: 6,
-        backgroundColor: "#22C55E",
-    },
-
-    empty: {
-        marginTop: 60,
-        textAlign: "center",
-        color: "#6E7D93",
-        fontSize: 14,
-    },
+    avatarText: { fontSize: 22, fontWeight: "800", color: COLORS.primary },
+    chatInfo: { flex: 1, marginLeft: 15 },
+    infoTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
+    infoBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    chatName: { fontSize: 17, fontWeight: "700", color: COLORS.onSurface, flex: 1, marginRight: 10 },
+    chatTime: { fontSize: 12, color: COLORS.outline, fontWeight: "600" },
+    chatDate: { fontSize: 13, color: COLORS.outline, fontWeight: "500" },
+    unreadDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: COLORS.primary },
+    center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+    emptyContainer: { alignItems: 'center', marginTop: 100 },
+    emptyText: { marginTop: 12, fontSize: 16, color: COLORS.outline, fontWeight: "600" }
 });

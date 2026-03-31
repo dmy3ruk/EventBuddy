@@ -2,32 +2,42 @@ import React, { useEffect, useState, useMemo } from "react";
 import { 
     View, Text, StyleSheet, TouchableOpacity, FlatList, StatusBar, Platform 
 } from "react-native";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaView } from "react-native-safe-area-context";
 import * as Haptics from 'expo-haptics';
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { getAuth } from "firebase/auth";
 import { collection, query, orderBy, onSnapshot } from "firebase/firestore";
 import { db } from "../../FirebaseConfig";
 import { useNavigation } from "@react-navigation/native";
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 
 import EventCard from "../../components/events/EventCard";
 import CreateEventModal from "../../components/modals/CreateEventModal";
 import { EventType } from "../../utils/types";
 import { filterEventsByTab, getTodayEvent } from "../../utils/eventUtils";
 import { fetchUsername, acceptInvite, declineInvite } from "../../utils/firestoreHelpers";
-import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
+
+// Твій фірмовий акцент #505BEB
+const COLORS = {
+  accent: "#505BEB", 
+  accentLight: "rgba(80, 91, 235, 0.12)",
+  surface: "#F8FAFC",
+  onSurface: "#1A1A1A",
+  secondary: "#64748B",
+  white: "#FFFFFF",
+  error: "#EF4444",
+  tabBg: "#E2E8F0",
+};
 
 export default function HomeScreen() {
-    const insets = useSafeAreaInsets();
     const tabBarHeight = useBottomTabBarHeight();
+    const navigation = useNavigation<any>();
+    const uid = getAuth().currentUser?.uid || "";
 
     const [activeTab, setActiveTab] = useState<"Upcoming" | "Invitings" | "My Events">("Upcoming");
     const [isModalVisible, setModalVisible] = useState(false);
     const [events, setEvents] = useState<EventType[]>([]);
     const [username, setUsername] = useState<string | null>(null);
-    
-    const navigation = useNavigation<any>();
-    const uid = getAuth().currentUser?.uid || "";
 
     useEffect(() => {
         const loadUser = async () => {
@@ -69,6 +79,7 @@ export default function HomeScreen() {
     return (
         <SafeAreaView style={styles.safeArea} edges={['top']}>
             <StatusBar barStyle="dark-content" />
+            
             <View style={styles.container}>
                 <FlatList
                     data={filteredEvents.length > 0 ? filteredEvents : [{ id: "empty" } as any]}
@@ -76,49 +87,49 @@ export default function HomeScreen() {
                     showsVerticalScrollIndicator={false}
                     contentContainerStyle={[
                         styles.listContent,
-                        { paddingBottom: tabBarHeight + 90 } 
+                        { paddingBottom: tabBarHeight + 100 } 
                     ]}
                     ListHeaderComponent={
-                        <>
-                            <View style={styles.headerRow}>
-                                <View style={{ flex: 1 }}>
+                        <View style={styles.headerContainer}>
+                            {/* Header Section */}
+                            <View style={styles.topRow}>
+                                <View>
                                     <Text style={styles.greeting}>{username ? `Hi, ${username}!` : "Welcome!"}</Text>
                                     <Text style={styles.subGreeting}>Ready to make memories?</Text>
                                 </View>
-                                <TouchableOpacity style={styles.iconButton} onPress={() => navigation.navigate("Chats")}>
-                                    <Ionicons name="chatbubble-ellipses-outline" size={24} color="#1A1A1A" />
+                                <TouchableOpacity 
+                                    style={styles.chatIconBtn} 
+                                    onPress={() => navigation.navigate("Chats")}
+                                >
+                                    <Ionicons name="chatbubble-ellipses" size={24} color={COLORS.accent} />
                                 </TouchableOpacity>
                             </View>
 
+                            {/* Today Event - #505BEB Accent */}
                             <View style={styles.todayCard}>
-                                <View style={styles.todayBgIcon}>
-                                    <Ionicons name="flash" size={100} color="rgba(255, 255, 255, 0.12)" />
-                                </View>
-
                                 <View style={styles.todayHeader}>
                                     <View style={styles.liveBadge}>
                                         <View style={styles.liveDot} />
-                                        <Text style={styles.liveText}>ТODAY</Text>
+                                        <Text style={styles.liveText}>TODAY</Text>
                                     </View>
-                                    <Ionicons name="star" size={16} color="#FFD700" />
+                                    <Ionicons name="sparkles" size={18} color="#FFD700" />
                                 </View>
 
                                 {todayEvent ? (
-                                    <View style={styles.todayBody}>
-                                        <Text style={styles.todayEventName} numberOfLines={1}>
-                                            {todayEvent.name}
-                                        </Text>
-                                        
-                                        <View style={styles.todayTags}>
+                                    <View>
+                                        <Text style={styles.todayTitle} numberOfLines={1}>{todayEvent.name}</Text>
+                                        <View style={styles.tagsRow}>
                                             <View style={styles.tag}>
-                                                <Ionicons name="time" size={12} color="#FFF" />
+                                                <Ionicons name="time-outline" size={14} color="#FFF" />
                                                 <Text style={styles.tagText}>{todayEvent.time}</Text>
                                             </View>
                                             <View style={styles.tag}>
-                                                <Text style={styles.tagText}>📍 {todayEvent.location?.name || "Somewhere"}</Text>
+                                                <Ionicons name="location-outline" size={14} color="#FFF" />
+                                                <Text style={styles.tagText} numberOfLines={1}>
+                                                    {todayEvent.location?.name || "Somewhere"}
+                                                </Text>
                                             </View>
                                         </View>
-
                                         <TouchableOpacity 
                                             activeOpacity={0.9} 
                                             style={styles.todayButton}
@@ -126,7 +137,7 @@ export default function HomeScreen() {
                                         >
                                             <Text style={styles.todayButtonText}>Open Event Chat</Text>
                                             <View style={styles.btnCircle}>
-                                                <Ionicons name="arrow-forward" size={14} color="#505BEB" />
+                                                <Ionicons name="arrow-forward" size={16} color={COLORS.accent} />
                                             </View>
                                         </TouchableOpacity>
                                     </View>
@@ -137,55 +148,54 @@ export default function HomeScreen() {
                                 )}
                             </View>
 
+                            {/* Tabs Switcher */}
                             <View style={styles.tabsWrapper}>
                                 {["Upcoming", "Invitings", "My Events"].map((tab) => {
-                                    // якщо це таб "Invitings" і filteredEvents для нього не пустий, показуємо індикатор
+                                    const isActive = activeTab === tab;
                                     const hasInvites = tab === "Invitings" && events.filter(e => filterEventsByTab([e], "Invitings", uid).length > 0).length > 0;
 
                                     return (
-                                    <TouchableOpacity
-                                        key={tab}
-                                        onPress={() => handleTabChange(tab as any)}
-                                        style={[styles.tabItem, activeTab === tab && styles.tabItemActive]}
-                                    >
-                                        <Text style={[styles.tabLabel, activeTab === tab && styles.tabLabelActive]}>
-                                        {tab === "Invitings" ? "Invites" : tab}
-                                        </Text>
-
-                                        {hasInvites && <View style={styles.tabBadge} />}
-                                    </TouchableOpacity>
+                                        <TouchableOpacity
+                                            key={tab}
+                                            onPress={() => handleTabChange(tab as any)}
+                                            style={[styles.tabBtn, isActive && styles.tabBtnActive]}
+                                        >
+                                            <Text style={[styles.tabLabel, isActive && styles.tabLabelActive]}>
+                                                {tab === "Invitings" ? "Invites" : tab}
+                                            </Text>
+                                            {hasInvites && <View style={styles.tabBadge} />}
+                                        </TouchableOpacity>
                                     );
                                 })}
-                                </View>
-                        </>
+                            </View>
+                        </View>
                     }
                     renderItem={({ item }) => (
                         item.id === "empty" ? (
                             <View style={styles.emptyState}>
-                                <Text style={styles.emptyStateText}>No events in this category</Text>
+                                <MaterialCommunityIcons name="calendar-question" size={60} color={COLORS.secondary} />
+                                <Text style={styles.emptyStateText}>No events found</Text>
                             </View>
                         ) : (
-                            <EventCard
-                                item={item}
-                                uid={uid}
-                                onOpenChat={openChat}
-                                onAccept={acceptInvite}
-                                onDecline={declineInvite}
-                            />
+                            <View style={styles.cardPadding}>
+                                <EventCard
+                                    item={item}
+                                    uid={uid}
+                                    onOpenChat={openChat}
+                                    onAccept={acceptInvite}
+                                    onDecline={declineInvite}
+                                />
+                            </View>
                         )
                     )}
                 />
 
+                {/* Floating Action Button */}
                 <TouchableOpacity
                     activeOpacity={0.8}
-                    style={[
-                        styles.addButtonFloating,
-                        { bottom: tabBarHeight + 10 }
-                    ]}
+                    style={[styles.fab, { bottom: tabBarHeight + 15 }]}
                     onPress={() => {
-                        if (Platform.OS === "ios") {
-                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                        }
+                        if (Platform.OS === "ios") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                         setModalVisible(true);
                     }}
                 >
@@ -199,98 +209,128 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-    safeArea: { 
-        flex: 1, 
-        backgroundColor: "#F8FAFC" 
+    safeArea: { flex: 1, backgroundColor: COLORS.surface },
+    container: { flex: 1 },
+    listContent: { paddingBottom: 20 },
+    headerContainer: { paddingHorizontal: 16 },
+    topRow: { 
+        flexDirection: "row", 
+        justifyContent: "space-between", 
+        alignItems: "center", 
+        paddingVertical: 20 
     },
-    container: { 
-        flex: 1, 
-        backgroundColor: "#F8FAFC" 
+    greeting: { fontSize: 28, fontWeight: "900", color: COLORS.onSurface, letterSpacing: -0.8 },
+    subGreeting: { fontSize: 15, color: COLORS.secondary, marginTop: 2 },
+    chatIconBtn: { 
+        width: 48, 
+        height: 48, 
+        borderRadius: 16, 
+        backgroundColor: COLORS.white, 
+        justifyContent: "center", 
+        alignItems: "center",
+        elevation: 3,
+        shadowColor: "#000",
+        shadowOpacity: 0.05,
+        shadowRadius: 8,
+        shadowOffset: { width: 0, height: 4 }
     },
-    listContent: { 
-        paddingBottom: 20,
+    todayCard: {
+        backgroundColor: COLORS.accent,
+        borderRadius: 28,
+        padding: 20,
+        marginBottom: 25,
+        elevation: 10,
+        shadowColor: COLORS.accent,
+        shadowOpacity: 0.3,
+        shadowRadius: 15,
+        shadowOffset: { width: 0, height: 8 }
     },
-    headerRow: { 
+    todayHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 15 },
+    liveBadge: { 
         flexDirection: "row", 
         alignItems: "center", 
-        paddingHorizontal: 20, 
-        paddingVertical: 15 // Трохи менше
+        backgroundColor: "rgba(255, 255, 255, 0.25)", 
+        paddingHorizontal: 10, 
+        paddingVertical: 5, 
+        borderRadius: 12 
     },
-    greeting: { fontSize: 26, fontWeight: "900", color: "#1A1A1A", letterSpacing: -0.5 },
-    subGreeting: { fontSize: 14, color: "#64748B", marginTop: 2 },
-    iconButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: "#FFF", justifyContent: "center", alignItems: "center", elevation: 2, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 5, shadowOffset: { width: 0, height: 2 } },
-
-    todayCard: {
-        backgroundColor: "#505BEB",
-        borderRadius: 24, // Більш лаконічно
-        padding: 16,     // Стиснуто з 24
-        marginHorizontal: 16,
-        marginBottom: 20,
-        position: "relative",
-        overflow: "hidden",
-        ...Platform.select({
-            ios: { shadowColor: "#505BEB", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.2, shadowRadius: 10 },
-            android: { elevation: 8 }
-        })
+    liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#FFD700", marginRight: 6 },
+    liveText: { fontSize: 11, fontWeight: "900", color: COLORS.white, letterSpacing: 0.8 },
+    todayTitle: { fontSize: 24, fontWeight: "800", color: COLORS.white, marginBottom: 12 },
+    tagsRow: { flexDirection: "row", gap: 8, marginBottom: 20 },
+    tag: { 
+        flexDirection: "row", 
+        alignItems: "center", 
+        backgroundColor: "rgba(255, 255, 255, 0.18)", 
+        paddingHorizontal: 10, 
+        paddingVertical: 6, 
+        borderRadius: 10 
     },
-    todayBgIcon: { position: "absolute", right: -10, top: -10, opacity: 0.5 },
-    todayHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
-    liveBadge: { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255, 255, 255, 0.2)", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10 },
-    liveDot: { width: 5, height: 5, borderRadius: 2.5, backgroundColor: "#FFD700", marginRight: 5 },
-    liveText: { fontSize: 12, fontWeight: "900", color: "#FFF", letterSpacing: 0.5 },
-    
-    todayBody: { zIndex: 2 },
-    todayEventName: { fontSize: 20, fontWeight: "800", color: "#FFF", marginBottom: 8, lineHeight: 26 },
-    todayTags: { flexDirection: "row", gap: 6, marginBottom: 16 },
-    tag: { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255, 255, 255, 0.15)", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
-    tagText: { color: "#FFF", fontSize: 12, fontWeight: "600", marginLeft: 4 },
-    
+    tagText: { color: COLORS.white, fontSize: 12, fontWeight: "600", marginLeft: 4 },
     todayButton: { 
-        backgroundColor: "#FFF", 
-        borderRadius: 12, 
-        paddingVertical: 10, 
-        paddingHorizontal: 16, 
+        backgroundColor: COLORS.white, 
+        borderRadius: 18, 
+        paddingVertical: 14, 
+        paddingHorizontal: 20, 
         flexDirection: "row", 
         alignItems: "center", 
         justifyContent: "space-between" 
     },
-    todayButtonText: { color: "#1A1A1A", fontSize: 14, fontWeight: "700" },
-    btnCircle: { width: 24, height: 24, borderRadius: 12, backgroundColor: "#F1F5F9", justifyContent: "center", alignItems: "center" },
-    
-    emptyToday: { paddingVertical: 10, alignItems: 'center' },
-    emptyTodayText: { color: "rgba(255, 255, 255, 0.8)", fontSize: 14, fontWeight: "500" },
-
-    tabsWrapper: { flexDirection: "row", backgroundColor: "#E2E8F0", padding: 4, borderRadius: 14, marginHorizontal: 16, marginBottom: 15 },
-    tabItem: { flex: 1, paddingVertical: 8, alignItems: "center", borderRadius: 10 },
-    tabItemActive: { backgroundColor: "#FFF", elevation: 2, shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 3, shadowOffset: { width: 0, height: 1 } },
-    tabLabel: { fontSize: 13, color: "#64748B", fontWeight: "700" },
-    tabLabelActive: { color: "#1A1A1A" },
-
-    addButtonFloating: {
+    todayButtonText: { color: COLORS.onSurface, fontSize: 15, fontWeight: "800" },
+    btnCircle: { 
+        width: 28, 
+        height: 28, 
+        borderRadius: 14, 
+        backgroundColor: COLORS.accentLight, 
+        justifyContent: "center", 
+        alignItems: "center" 
+    },
+    emptyToday: { paddingVertical: 15, alignItems: 'center' },
+    emptyTodayText: { color: "rgba(255, 255, 255, 0.8)", fontSize: 14, fontWeight: "600" },
+    tabsWrapper: { 
+        flexDirection: "row", 
+        backgroundColor: COLORS.tabBg, 
+        padding: 5, 
+        borderRadius: 20, 
+        marginBottom: 20 
+    },
+    tabBtn: { flex: 1, paddingVertical: 10, alignItems: "center", borderRadius: 16, position: "relative" },
+    tabBtnActive: { 
+        backgroundColor: COLORS.white, 
+        elevation: 4, 
+        shadowColor: "#000", 
+        shadowOpacity: 0.1, 
+        shadowRadius: 5 
+    },
+    tabLabel: { fontSize: 13, color: COLORS.secondary, fontWeight: "700" },
+    tabLabelActive: { color: COLORS.onSurface },
+    tabBadge: { 
+        position: "absolute", 
+        top: 6, 
+        right: 12, 
+        width: 10, 
+        height: 10, 
+        borderRadius: 5, 
+        backgroundColor: COLORS.error,
+        borderWidth: 2,
+        borderColor: COLORS.white
+    },
+    cardPadding: { marginBottom: 8 },
+    emptyState: { alignItems: "center", marginTop: 60 },
+    emptyStateText: { color: COLORS.secondary, fontSize: 16, fontWeight: "600", marginTop: 12 },
+    fab: {
         position: "absolute",
-        left: "50%",
-        transform: [{ translateX: -30 }],
-        backgroundColor: "#16A34A", // Чистий зелений (виглядає краще за прозорий)
-        width: 60,
-        height: 60,
-        borderRadius: 30,
+        alignSelf: "center",
+        backgroundColor: "#16A34A", // Лишаємо зелений для FAB, щоб він виділявся на фоні синього
+        width: 64,
+        height: 64,
+        borderRadius: 22,
         justifyContent: "center",
         alignItems: "center",
-        elevation: 6,
+        elevation: 8,
         shadowColor: "#000",
-        shadowOpacity: 0.2,
-        shadowRadius: 5,
-        shadowOffset: { width: 0, height: 3 }
+        shadowOpacity: 0.25,
+        shadowRadius: 10,
+        shadowOffset: { width: 0, height: 4 }
     },
-    tabBadge: {
-        position: "absolute",
-        top: 4,
-        right: 6,
-        width: 10,
-        height: 10,
-        borderRadius: 5,
-        backgroundColor: "#EF4444",
-      },
-    emptyState: { alignItems: "center", paddingVertical: 60 },
-    emptyStateText: { color: "#94A3B8", fontSize: 16, fontWeight: "500" },
 });

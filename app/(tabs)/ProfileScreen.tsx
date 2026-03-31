@@ -1,428 +1,368 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Modal } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { Image } from "expo-image";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  Platform,
+} from "react-native";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { getAuth } from "firebase/auth";
 import { router } from "expo-router";
-import {auth, db} from "../../FirebaseConfig";
+import { auth, db } from "../../FirebaseConfig";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { doc, onSnapshot } from "firebase/firestore";
 
 import {
-    fetchUsername,
-    subscribeToOwnerEvents,
-    subscribeToInvitedEvents,
-    calculateProfileStats,
+  fetchUsername,
+  subscribeToOwnerEvents,
+  subscribeToInvitedEvents,
+  calculateProfileStats,
 } from "../../utils/firestoreHelpers";
 import { EventType } from "../../utils/types";
-import { ScrollView } from "react-native";
-import {doc, onSnapshot} from "firebase/firestore";
+
+// Палітра адаптована під твій фірмовий #505BEB
+const COLORS = {
+  primary: "#505BEB",
+  primaryContainer: "rgba(80, 91, 235, 0.1)",
+  surface: "#F8FAFC",
+  onSurface: "#1A1A1A",
+  outline: "#64748B",
+  error: "#EF4444",
+  white: "#FFFFFF",
+  cardBg: "#FFFFFF",
+};
 
 export default function ProfileScreen() {
-    const [modalVisible, setModalVisible] = useState(false);
-    const [username, setUsername] = useState<string>("");
+  const [username, setUsername] = useState<string>("");
+  const [ownerEvents, setOwnerEvents] = useState<EventType[]>([]);
+  const [invitedEvents, setInvitedEvents] = useState<EventType[]>([]);
+  const [upcomingCount, setUpcomingCount] = useState(0);
+  const [totalAttendees, setTotalAttendees] = useState(0);
+  const [friendsConected, setFriendsConected] = useState(0);
 
-    const [ownerEvents, setOwnerEvents] = useState<EventType[]>([]);
-    const [invitedEvents, setInvitedEvents] = useState<EventType[]>([]);
+  const user = getAuth().currentUser;
+  const uid = user?.uid;
+  const email = user?.email;
 
-    const [upcomingCount, setUpcomingCount] = useState(0);
-    const [pendingInvitesCount, setPendingInvitesCount] = useState(0);
-    const [totalAttendees, setTotalAttendees] = useState(0);
-    const [friendsConected, setFriendsConected ]= useState(0);
-    const uid = getAuth().currentUser?.uid;
-    const email = getAuth().currentUser?.email;
-
-    // завантаження username через хелпер
-    useEffect(() => {
-        const loadUsername = async () => {
-            const name = await fetchUsername();
-            if (name) {
-                setUsername(name);
-            } else {
-                setUsername("No username");
-            }
-        };
-
-        loadUsername();
-    }, []);
-
-    // сторож аутентифікації
-    useEffect(() => {
-        const unsubscribe = getAuth().onAuthStateChanged((user) => {
-            if (!user) {
-                router.replace("/SignIn");
-            }
-        });
-
-        return unsubscribe;
-    }, []);
-
-    // підписка на події, створені мною
-    useEffect(() => {
-        const unsubscribeOwner = subscribeToOwnerEvents((events) => {
-            setOwnerEvents(events as EventType[]);
-        });
-
-        return unsubscribeOwner;
-    }, []);
-
-    // підписка на події, куди мене запросили
-    useEffect(() => {
-        const unsubscribeInvited = subscribeToInvitedEvents((events) => {
-            setInvitedEvents(events as EventType[]);
-        });
-
-        return unsubscribeInvited;
-    }, []);
-
-    useEffect(() => {
-        if (!uid) return;
-
-        const unsubscribeFriends = onSnapshot(doc(db, "users", uid), (docSnap) => {
-            if (docSnap.exists()) {
-                const friends = docSnap.data().friends || [];
-                setFriendsConected(friends.length);
-            }
-        });
-
-        return unsubscribeFriends();
-    }, []);
-
-
-    // перерахунок статистики при зміні списків подій
-    useEffect(() => {
-        if (!uid) return;
-
-        const stats = calculateProfileStats(ownerEvents, invitedEvents, uid);
-
-        setUpcomingCount(stats.upcomingCount);
-        setPendingInvitesCount(stats.pendingInvitesCount);
-        setTotalAttendees(stats.totalAttendees);
-    }, [ownerEvents, invitedEvents]);
-
-    const handleLogout = async () => {
-        try {
-            await auth.signOut();
-            router.replace("/SignIn");
-        } catch (e) {
-            console.log("Logout error", e);
-        }
+  useEffect(() => {
+    const loadUsername = async () => {
+      const name = await fetchUsername();
+      setUsername(name || "No username");
     };
+    loadUsername();
+  }, []);
 
+  useEffect(() => {
+    const unsubscribe = getAuth().onAuthStateChanged((u) => {
+      if (!u) router.replace("/SignIn");
+    });
+    return unsubscribe;
+  }, []);
 
-    return (
-        <ScrollView
-            style={styles.container}
-            contentContainerStyle={styles.scrollContent}
-            showsVerticalScrollIndicator={false}
-        >
+  useEffect(() => {
+    const unsubOwner = subscribeToOwnerEvents((evs) => setOwnerEvents(evs as EventType[]));
+    const unsubInvited = subscribeToInvitedEvents((evs) => setInvitedEvents(evs as EventType[]));
+    return () => { unsubOwner(); unsubInvited(); };
+  }, []);
 
+  useEffect(() => {
+    if (!uid) return;
+    return onSnapshot(doc(db, "users", uid), (docSnap) => {
+      if (docSnap.exists()) {
+        setFriendsConected(docSnap.data().friends?.length || 0);
+      }
+    });
+  }, [uid]);
 
-        {/* Profile Card */}
-            <View style={styles.profileCard}>
-                <View style={styles.avatarWrapper}>
-                    <View style={styles.avatar}>
-                        <Text style={styles.avatarText}>
-                            {username ? username[0]?.toUpperCase() : "A"}
-                        </Text>
-                    </View>
+  useEffect(() => {
+    if (!uid) return;
+    const stats = calculateProfileStats(ownerEvents, invitedEvents, uid);
+    setUpcomingCount(stats.upcomingCount);
+    setTotalAttendees(stats.totalAttendees);
+  }, [ownerEvents, invitedEvents, uid]);
 
-                    <TouchableOpacity style={styles.editIcon}>
-                        <Ionicons name="pencil" size={14} color="#fff" />
-                    </TouchableOpacity>
-                </View>
+  const handleLogout = async () => {
+    try {
+      await auth.signOut();
+      router.replace("/SignIn");
+    } catch (e) { console.log(e); }
+  };
 
-                <View style={styles.description}>
-                    <Text style={styles.name}>{username}</Text>
-                    <Text style={styles.email}>{email}</Text>
-                </View>
+  return (
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        
+        {/* Header with Logout */}
+        <View style={styles.topActions}>
+          <Text style={styles.topTitle}>Profile</Text>
+          <TouchableOpacity onPress={handleLogout} style={styles.logoutBtn}>
+            <MaterialCommunityIcons name="logout-variant" size={22} color={COLORS.error} />
+          </TouchableOpacity>
+        </View>
+
+        {/* Profile Header Section */}
+        <View style={styles.profileHeader}>
+          <View style={styles.avatarWrapper}>
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>{username ? username[0]?.toUpperCase() : "A"}</Text>
             </View>
+            <TouchableOpacity style={styles.editFab}>
+              <Ionicons name="camera" size={16} color={COLORS.white} />
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.nameText}>{username}</Text>
+          <Text style={styles.emailText}>{email}</Text>
+        </View>
 
-            {/* Statistics */}
-            <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Statistics</Text>
-                <View style={styles.statsGrid}>
-                    <View style={styles.statItem}>
-                        <Text style={styles.statNumber}>{ownerEvents.length}</Text>
-                        <Text style={styles.statLabel}>Events Created</Text>
-                    </View>
-                    <View style={styles.statItem}>
-                        <Text style={styles.statNumber}>{totalAttendees}</Text>
-                        <Text style={styles.statLabel}>Events Attended</Text>
-                    </View>
-                    <View style={styles.statItem}>
-                        <Text style={styles.statNumber}>{friendsConected}</Text>
-                        <Text style={styles.statLabel}>Friends Connected</Text>
-                    </View>
-                    <View style={styles.statItem}>
-                        <Text style={styles.statNumber}>{upcomingCount}</Text>
-                        <Text style={styles.statLabel}>Upcoming Events</Text>
-                    </View>
-                </View>
-            </View>
+        {/* Statistics Grid */}
+        <View style={styles.statsContainer}>
+          <View style={styles.statsRow}>
+            <StatCard label="My Events" value={ownerEvents.length} icon="calendar-star" color={COLORS.primary} />
+            <StatCard label="Attended" value={totalAttendees} icon="check-decagram" color="#16A34A" />
+          </View>
+          <View style={styles.statsRow}>
+            <StatCard label="Friends" value={friendsConected} icon="account-group" color="#0EA5E9" />
+            <StatCard label="Upcoming" value={upcomingCount} icon="clock-fast" color="#F59E0B" />
+          </View>
+        </View>
 
-            {/* Account Settings */}
-            <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Account Settings</Text>
+        {/* Settings Section */}
+        <View style={styles.settingsSection}>
+          <Text style={styles.sectionLabel}>Preferences</Text>
+          
+          <SettingsItem 
+            icon="bell-outline" 
+            title="Notifications" 
+            sub="Manage alerts for events" 
+            action={<Text style={styles.actionText}>On</Text>} 
+          />
+          <SettingsItem 
+            icon="shield-lock-outline" 
+            title="Privacy" 
+            sub="Visibility and data control" 
+            showChevron
+          />
+          <SettingsItem 
+            icon="account-check-outline" 
+            title="Verification" 
+            sub="Member since March 2023" 
+            action={
+                <View style={styles.badge}><Text style={styles.badgeText}>Active</Text></View>
+            }
+          />
+        </View>
 
-                <View style={styles.settingsItem}>
-                    <Image
-                        source={require("../../assets/images/notif.svg")}
-                        style={{ width: 40, height: 40, marginRight:8 }}
-                        contentFit="contain"
-                    />
-                    <View style={styles.settingsText}>
-                        <Text style={styles.settingsTitle}>Notifications</Text>
-                        <Text style={styles.settingsSub}>Manage your notification preferences</Text>
-                    </View>
-                    <Text style={styles.link}>Configure</Text>
-                </View>
-
-                <View style={styles.settingsItem}>
-                    <Image
-                        source={require("../../assets/images/settings.svg")}
-                        style={{ width: 40, height: 40, marginRight:8 }}
-                        contentFit="contain"
-                    />
-                    <View style={styles.settingsText}>
-                        <Text style={styles.settingsTitle}>Privacy Settings</Text>
-                        <Text style={styles.settingsSub}>Control who can see your profile</Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={18} color="#999" />
-                </View>
-
-                {/*<View style={styles.settingsItem}>*/}
-                {/*    <Image*/}
-                {/*        source={require("../../assets/images/verification.svg")}*/}
-                {/*        style={{ width: 40, height: 40, marginRight:8 }}*/}
-                {/*        contentFit="contain"*/}
-                {/*    />*/}
-                {/*    <View style={styles.settingsText}>*/}
-                {/*        <Text style={styles.settingsTitle}>Account Verification</Text>*/}
-                {/*        <Text style={styles.settingsSub}>Verify your account for added security</Text>*/}
-                {/*    </View>*/}
-                {/*    <View style={styles.verifiedBadge}>*/}
-                {/*        <Text style={styles.verifiedText}>Verified</Text>*/}
-                {/*    </View>*/}
-                {/*</View>*/}
-
-                <TouchableOpacity style={[styles.settingsItem, { marginBottom: 12 }]} onPress={handleLogout}>
-                    <Image
-                        source={require("../../assets/images/signout.png")}
-                        style={{ width: 40, height: 40, marginRight:8 }}
-                        contentFit="contain"
-                    />
-                    <View style={styles.settingsText}>
-                        <Text style={[styles.settingsTitle, { color: "#EF4444" }]}>
-                            Sign Out
-                        </Text>
-                        <Text style={styles.settingsSub}>Sign out of your account</Text>
-                </View>
-
-                </TouchableOpacity>
-            </View>
-
-            <Text style={styles.memberSince}>Member since March 2023</Text>
-        </ScrollView>
-    );
-
+        <Text style={styles.footerText}>EventBuddy v1.0.4</Text>
+      </ScrollView>
+    </SafeAreaView>
+  );
 }
+
+// --- SUB-COMPONENTS ---
+
+const StatCard = ({ label, value, icon, color }: any) => (
+  <View style={styles.statCard}>
+    <View style={[styles.iconCircle, { backgroundColor: color + '15' }]}>
+      <MaterialCommunityIcons name={icon} size={24} color={color} />
+    </View>
+    <Text style={styles.statValue}>{value}</Text>
+    <Text style={styles.statLabel}>{label}</Text>
+  </View>
+);
+
+const SettingsItem = ({ icon, title, sub, action, showChevron }: any) => (
+  <TouchableOpacity style={styles.settingsRow}>
+    <View style={styles.settingsIconBg}>
+      <MaterialCommunityIcons name={icon} size={24} color={COLORS.primary} />
+    </View>
+    <View style={styles.settingsTextContent}>
+      <Text style={styles.settingsTitle}>{title}</Text>
+      <Text style={styles.settingsSubText}>{sub}</Text>
+    </View>
+    {action}
+    {showChevron && <Ionicons name="chevron-forward" size={20} color={COLORS.outline} />}
+  </TouchableOpacity>
+);
+
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: "#F5F6FA",
-    },
-
-    scrollContent: {
-        alignItems: "center",
-        paddingBottom: 40,
-    },
-
-    /* ===== PROFILE CARD ===== */
-    profileCard: {
-        marginTop:80,
-        marginBottom: 0,
-        width: "95%",
-        borderRadius: 20,
-        paddingVertical: 8,
-        paddingHorizontal: 20,
-        alignItems: "center",
-    },
-
-    avatarWrapper: {
-        position: "relative",
-        marginBottom: 12,
-        borderRadius: 60, // коло
-        borderWidth: 4,
-        borderColor: "#FFFFFF",
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-
-        // shadow (Android)
-        elevation: 4,
-    },
-
-    description:{
-        width: "50%",
-        paddingVertical:8,
-        alignItems:"center",
-        backgroundColor: "#FFFFFF",
-        borderRadius: 16,
-        borderColor: "#E2E8F0",
-        borderWidth:1,
-        marginBottom:0
-    },
-    avatar: {
-        width: 96,
-        height: 96,
-        borderRadius: 48,
-        backgroundColor: "#4CAF50",
-        justifyContent: "center",
-        alignItems: "center",
-    },
-
-    avatarText: {
-        fontSize: 32,
-        fontWeight: "700",
-        color: "#FFFFFF",
-    },
-
-    editIcon: {
-        position: "absolute",
-        right: 0,
-        bottom: 0,
-        backgroundColor: "#4F46E5",
-        width: 24,
-        height: 24,
-        borderRadius: 12,
-        justifyContent: "center",
-        alignItems: "center",
-    },
-
-    name: {
-        fontSize: 20,
-        fontWeight: "600",
-        color: "#111827",
-        marginTop: 6,
-    },
-
-    email: {
-        fontSize: 14,
-        color: "#6B7280",
-        marginTop: 4,
-    },
-
-    location: {
-        fontSize: 13,
-        color: "#9CA3AF",
-        marginTop: 2,
-    },
-
-    bio: {
-        marginTop: 12,
-        fontSize: 14,
-        color: "#6B7280",
-        textAlign: "center",
-        lineHeight: 20,
-    },
-
-    /* ===== SECTIONS ===== */
-    section: {
-        width: "95%",
-        marginTop: 12,
-        backgroundColor: "#FFFFFF",
-        borderRadius: 16,
-        borderColor: "#E2E8F0",
-        borderWidth:1
-    },
-
-    sectionTitle: {
-        fontSize: 18,
-        fontWeight: "600",
-        color: "#111827",
-        marginLeft:20,
-        marginTop:25,
-        marginBottom:8,
-    },
-
-    /* ===== STATISTICS ===== */
-    statsGrid: {
-        backgroundColor: "#FFFFFF",
-        borderRadius: 16,
-        flexDirection: "row",
-        flexWrap: "wrap",
-        paddingVertical: 16,
-    },
-
-    statItem: {
-        width: "50%",
-        alignItems: "center",
-        marginVertical: 12,
-    },
-
-    statNumber: {
-        fontSize: 22,
-        fontWeight: "700",
-        color: "#4F46E5",
-    },
-
-    statLabel: {
-        marginTop: 4,
-        fontSize: 13,
-        color: "#6B7280",
-    },
-
-    /* ===== ACCOUNT SETTINGS ===== */
-    settingsItem: {
-        flexDirection: "row",
-        alignItems: "center",
-        backgroundColor: "#FFFFFF",
-        borderRadius: 12,
-        paddingVertical: 14,
-        paddingHorizontal: 14,
-        marginBottom: 0,
-    },
-
-    settingsText: {
-        flex: 1,
-        marginLeft: 12,
-    },
-
-    settingsTitle: {
-        fontSize: 15,
-        fontWeight: "500",
-        color: "#111827",
-    },
-
-    settingsSub: {
-        fontSize: 12,
-        color: "#6B7280",
-        marginTop: 2,
-    },
-
-    link: {
-        fontSize: 13,
-        fontWeight: "500",
-        color: "#4F46E5",
-    },
-
-    verifiedBadge: {
-        backgroundColor: "#22C55E",
-        paddingHorizontal: 10,
-        paddingVertical: 4,
-        borderRadius: 999,
-    },
-
-    verifiedText: {
-        color: "#FFFFFF",
-        fontSize: 12,
-        fontWeight: "500",
-    },
-
-    /* ===== MEMBER SINCE ===== */
-    memberSince: {
-        marginTop: 14,
-        fontSize: 12,
-        color: "#9CA3AF",
-    },
+  container: {
+    flex: 1,
+    backgroundColor: COLORS.surface,
+  },
+  scrollContent: {
+    paddingBottom: 40,
+    paddingHorizontal: 20,
+  },
+  topActions: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 20,
+    marginBottom: 30,
+  },
+  topTitle: {
+    fontSize: 28,
+    fontWeight: "900",
+    color: COLORS.onSurface,
+    letterSpacing: -0.5,
+  },
+  logoutBtn: {
+    padding: 10,
+    backgroundColor: COLORS.white,
+    borderRadius: 14,
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowRadius: 5,
+  },
+  profileHeader: {
+    alignItems: "center",
+    marginBottom: 30,
+  },
+  avatarWrapper: {
+    position: "relative",
+    marginBottom: 16,
+  },
+  avatar: {
+    width: 100,
+    height: 100,
+    borderRadius: 35, // Squircle
+    backgroundColor: COLORS.primary,
+    justifyContent: "center",
+    alignItems: "center",
+    elevation: 10,
+    shadowColor: COLORS.primary,
+    shadowOpacity: 0.3,
+    shadowRadius: 15,
+    shadowOffset: { width: 0, height: 6 }
+  },
+  avatarText: {
+    fontSize: 40,
+    fontWeight: "bold",
+    color: COLORS.white,
+  },
+  editFab: {
+    position: "absolute",
+    bottom: -5,
+    right: -5,
+    backgroundColor: COLORS.primary,
+    padding: 8,
+    borderRadius: 12,
+    borderWidth: 3,
+    borderColor: COLORS.surface,
+  },
+  nameText: {
+    fontSize: 24,
+    fontWeight: "800",
+    color: COLORS.onSurface,
+  },
+  emailText: {
+    fontSize: 14,
+    color: COLORS.outline,
+    marginTop: 4,
+    fontWeight: "500"
+  },
+  statsContainer: {
+    gap: 12,
+    marginBottom: 30,
+  },
+  statsRow: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  statCard: {
+    flex: 1,
+    backgroundColor: COLORS.white,
+    padding: 16,
+    borderRadius: 24,
+    alignItems: "center",
+    elevation: 3,
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 }
+  },
+  iconCircle: {
+    padding: 10,
+    borderRadius: 16,
+    marginBottom: 8,
+  },
+  statValue: {
+    fontSize: 22,
+    fontWeight: "900",
+    color: COLORS.onSurface,
+  },
+  statLabel: {
+    fontSize: 12,
+    color: COLORS.outline,
+    marginTop: 2,
+    fontWeight: "600"
+  },
+  settingsSection: {
+    backgroundColor: COLORS.white,
+    borderRadius: 28,
+    padding: 12,
+    elevation: 3,
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+  },
+  sectionLabel: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: COLORS.primary,
+    marginLeft: 12,
+    marginVertical: 10,
+    textTransform: "uppercase",
+    letterSpacing: 1.2
+  },
+  settingsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 12,
+    borderRadius: 20,
+  },
+  settingsIconBg: {
+    padding: 10,
+    backgroundColor: COLORS.primaryContainer,
+    borderRadius: 14,
+    marginRight: 15,
+  },
+  settingsTextContent: {
+    flex: 1,
+  },
+  settingsTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: COLORS.onSurface,
+  },
+  settingsSubText: {
+    fontSize: 12,
+    color: COLORS.outline,
+    fontWeight: "500"
+  },
+  actionText: {
+    color: COLORS.primary,
+    fontWeight: "800",
+  },
+  badge: {
+    backgroundColor: COLORS.primaryContainer,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+  },
+  badgeText: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: COLORS.primary,
+  },
+  footerText: {
+    textAlign: "center",
+    marginTop: 25,
+    color: COLORS.outline,
+    fontSize: 11,
+    fontWeight: "600"
+  },
 });
