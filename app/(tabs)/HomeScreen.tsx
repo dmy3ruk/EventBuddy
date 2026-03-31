@@ -40,7 +40,10 @@ export default function HomeScreen() {
     useEffect(() => {
         const q = query(collection(db, "events"), orderBy("createdAt", "desc"));
         return onSnapshot(q, (snapshot) => {
-            const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as EventType));
+            const data = snapshot.docs.map(doc => ({ 
+                id: doc.id, 
+                ...doc.data() 
+            } as unknown as EventType));
             setEvents(data);
         });
     }, []);
@@ -95,7 +98,7 @@ export default function HomeScreen() {
                                 <View style={styles.todayHeader}>
                                     <View style={styles.liveBadge}>
                                         <View style={styles.liveDot} />
-                                        <Text style={styles.liveText}>СЬОГОДНІ</Text>
+                                        <Text style={styles.liveText}>ТODAY</Text>
                                     </View>
                                     <Ionicons name="star" size={16} color="#FFD700" />
                                 </View>
@@ -112,7 +115,7 @@ export default function HomeScreen() {
                                                 <Text style={styles.tagText}>{todayEvent.time}</Text>
                                             </View>
                                             <View style={styles.tag}>
-                                                <Text style={styles.tagText}>📍 {todayEvent.locationName || "Somewhere"}</Text>
+                                                <Text style={styles.tagText}>📍 {todayEvent.location?.name || "Somewhere"}</Text>
                                             </View>
                                         </View>
 
@@ -135,18 +138,25 @@ export default function HomeScreen() {
                             </View>
 
                             <View style={styles.tabsWrapper}>
-                                {["Upcoming", "Invitings", "My Events"].map((tab) => (
+                                {["Upcoming", "Invitings", "My Events"].map((tab) => {
+                                    // якщо це таб "Invitings" і filteredEvents для нього не пустий, показуємо індикатор
+                                    const hasInvites = tab === "Invitings" && events.filter(e => filterEventsByTab([e], "Invitings", uid).length > 0).length > 0;
+
+                                    return (
                                     <TouchableOpacity
                                         key={tab}
                                         onPress={() => handleTabChange(tab as any)}
                                         style={[styles.tabItem, activeTab === tab && styles.tabItemActive]}
                                     >
                                         <Text style={[styles.tabLabel, activeTab === tab && styles.tabLabelActive]}>
-                                            {tab === "Invitings" ? "Invites" : tab}
+                                        {tab === "Invitings" ? "Invites" : tab}
                                         </Text>
+
+                                        {hasInvites && <View style={styles.tabBadge} />}
                                     </TouchableOpacity>
-                                ))}
-                            </View>
+                                    );
+                                })}
+                                </View>
                         </>
                     }
                     renderItem={({ item }) => (
@@ -227,7 +237,7 @@ const styles = StyleSheet.create({
     todayHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
     liveBadge: { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255, 255, 255, 0.2)", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10 },
     liveDot: { width: 5, height: 5, borderRadius: 2.5, backgroundColor: "#FFD700", marginRight: 5 },
-    liveText: { fontSize: 10, fontWeight: "900", color: "#FFF", letterSpacing: 0.5 },
+    liveText: { fontSize: 12, fontWeight: "900", color: "#FFF", letterSpacing: 0.5 },
     
     todayBody: { zIndex: 2 },
     todayEventName: { fontSize: 20, fontWeight: "800", color: "#FFF", marginBottom: 8, lineHeight: 26 },
@@ -272,6 +282,15 @@ const styles = StyleSheet.create({
         shadowRadius: 5,
         shadowOffset: { width: 0, height: 3 }
     },
+    tabBadge: {
+        position: "absolute",
+        top: 4,
+        right: 6,
+        width: 10,
+        height: 10,
+        borderRadius: 5,
+        backgroundColor: "#EF4444",
+      },
     emptyState: { alignItems: "center", paddingVertical: 60 },
     emptyStateText: { color: "#94A3B8", fontSize: 16, fontWeight: "500" },
 });

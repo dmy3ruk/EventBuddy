@@ -1,19 +1,25 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, TouchableOpacity, StyleSheet, Platform, Linking } from "react-native";
+import { 
+  View, Text, TouchableOpacity, StyleSheet, Platform, 
+  Linking, Alert 
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, deleteDoc } from "firebase/firestore";
 import { db } from "../../FirebaseConfig";
 import { EventType } from "../../utils/types";
 
 type Props = {
   item: EventType;
   uid: string;
-  onOpenChat: (event: EventType) => void;
-  onAccept: (eventId: string) => void;
-  onDecline: (eventId: string) => void;
+  onOpenChat?: (event: EventType) => void;
+  onAccept?: (eventId: string) => void;
+  onDecline?: (eventId: string) => void;
+  onJoinToggle?: (eventId: string) => void; 
+  onDelete?: (eventId: string) => void;
+  mode?: 'my-events' | 'discover'; 
 };
 
-// --- Допоміжні функції (без змін) ---
+// --- Helpers ---
 const openMap = (lat: number, lng: number, label: string) => {
   const scheme = Platform.select({ ios: 'maps:0,0?q=', android: 'geo:0,0?q=' });
   const url = Platform.select({
@@ -23,31 +29,17 @@ const openMap = (lat: number, lng: number, label: string) => {
   if (url) Linking.openURL(url);
 };
 
-function getEventStatus(event: EventType, uid: string) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const d = new Date(event.date);
-  d.setHours(0, 0, 0, 0);
-  const isInvited = event.invitedUserIds?.includes(uid) && !event.acceptedUserIds?.includes(uid);
-  if (isInvited) return "Invitation";
-  if (d < today) return "Past";
-  return "Upcoming";
-}
-
 const getCategoryTheme = (category?: string) => {
   const cat = category?.toLowerCase() || "";
-  if (cat.includes("sport"))  return { primary: "#059669", bg: "#D1FAE5" }; 
-  if (cat.includes("music"))  return { primary: "#7C3AED", bg: "#EDE9FE" }; 
-  if (cat.includes("food") || cat.includes("drink")) return { primary: "#D97706", bg: "#FEF3C7" }; 
-  if (cat.includes("study") || cat.includes("work")) return { primary: "#4F46E5", bg: "#E0E7FF" }; 
-  if (cat.includes("movie"))  return { primary: "#E11D48", bg: "#FFE4E6" }; 
-  if (cat.includes("party"))  return { primary: "#C026D3", bg: "#F5D0FE" }; 
-  if (cat.includes("games"))  return { primary: "#0891B2", bg: "#CFFAFE" }; 
-  if (cat.includes("coffee")) return { primary: "#78350F", bg: "#FEF3C7" }; 
-  return { primary: "#475569", bg: "#F1F5F9" }; 
+  if (cat.includes("sport"))  return { primary: "#10B981", bg: "#F0FDF4" };
+  if (cat.includes("music"))  return { primary: "#8B5CF6", bg: "#F5F3FF" };
+  if (cat.includes("food"))   return { primary: "#F59E0B", bg: "#FFFBEB" };
+  if (cat.includes("study"))  return { primary: "#3B82F6", bg: "#EFF6FF" };
+  if (cat.includes("party"))  return { primary: "#EC4899", bg: "#FDF2F8" };
+  return { primary: "#64748B", bg: "#F8FAFC" };
 };
 
-// --- Підкомпонент учасників (компактніший) ---
+// --- Sub-components ---
 function ParticipantsRow({ item, usersMap }: { item: EventType; usersMap: Record<string, string> }) {
   const participants = [item.userId, ...(item.acceptedUserIds || [])];
   const uniqueParticipants = Array.from(new Set(participants));
@@ -59,7 +51,10 @@ function ParticipantsRow({ item, usersMap }: { item: EventType; usersMap: Record
     <View style={styles.participantRow}>
       <View style={styles.avatarsGroup}>
         {visible.map((pUid, index) => (
-          <View key={pUid} style={[styles.avatar, { backgroundColor: colors[index % colors.length], zIndex: 10 - index }]}>
+          <View
+            key={pUid}
+            style={[styles.avatar, { backgroundColor: colors[index % colors.length], zIndex: 10 - index }]}
+          >
             <Text style={styles.avatarText}>{usersMap[pUid]?.[0]?.toUpperCase() || "U"}</Text>
           </View>
         ))}
@@ -74,122 +69,130 @@ function ParticipantsRow({ item, usersMap }: { item: EventType; usersMap: Record
   );
 }
 
-// --- Основний компонент ---
-export default function EventCard({ item, uid, onOpenChat, onAccept, onDecline }: Props) {
+export default function EventCard({ item, uid, onOpenChat, onAccept, onDecline, onJoinToggle, onDelete, mode = 'my-events' }: Props) {
   const isOwner = item.userId === uid;
   const isAccepted = item.acceptedUserIds?.includes(uid);
-  const isInvited = item.invitedUserIds?.includes(uid) && !item.acceptedUserIds?.includes(uid);
-  const isPublic = item.isPublic;
-  const status = getEventStatus(item, uid);
+  const isInvited = item.invitedUserIds?.includes(uid) && !isAccepted;
   const theme = getCategoryTheme(item.category);
-
   const [usersMap, setUsersMap] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const participants = Array.from(new Set([item.userId, ...(item.acceptedUserIds || [])]));
     const loadUsers = async () => {
       const map: Record<string, string> = {};
-      await Promise.all(participants.map(async (pUid) => {
-        const snap = await getDoc(doc(db, "usernames", pUid));
-        if (snap.exists()) map[pUid] = snap.data().username;
-      }));
+      await Promise.all(
+        participants.map(async (pUid) => {
+          const snap = await getDoc(doc(db, "usernames", pUid));
+          if (snap.exists()) map[pUid] = snap.data().username;
+        })
+      );
       setUsersMap(map);
     };
     loadUsers();
-  }, [item.userId, item.acceptedUserIds]);
+  }, [item.acceptedUserIds, item.userId]);
+
+  const handleDelete = () => {
+    Alert.alert("Delete Event", `Delete "${item.name}"?`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await deleteDoc(doc(db, "events", item.id));
+            onDelete?.(item.id);
+          } catch (e) { Alert.alert("Error", "Failed to delete"); }
+        },
+      },
+    ]);
+  };
+
+  const hasLocation = !!(item.location?.latitude && item.location?.longitude);
 
   return (
-    <View style={[styles.card, isOwner && { borderLeftColor: theme.primary, borderLeftWidth: 4 }]}>
-      
-      {/* Header */}
+    <View style={[styles.card, { borderLeftColor: theme.primary }]}>
       <View style={styles.eventHeader}>
         <View style={{ flex: 1 }}>
+          <View style={[styles.badge, { backgroundColor: theme.bg }]}>
+            <Text style={[styles.badgeText, { color: theme.primary }]}>
+                {item.category ? `#${item.category}` : "#general"}
+            </Text>
+          </View>
           <Text style={styles.eventName} numberOfLines={1}>{item.name}</Text>
-          <Text style={[styles.categoryLabel, { color: theme.primary }]}>
-            {item.category ? `#${item.category}` : "#general"}
-          </Text>
         </View>
 
-        <View style={[styles.typeBadge, isPublic ? styles.publicBadge : styles.privateBadge]}>
+        <View style={[styles.typeBadge, item.isPublic ? styles.publicBadge : styles.privateBadge]}>
           <Ionicons 
-            name={isPublic ? "globe-outline" : "lock-closed-outline"} 
+            name={item.isPublic ? "globe-outline" : "lock-closed-outline"} 
             size={10} 
-            color={isPublic ? "#059669" : "#6366F1"} 
+            color={item.isPublic ? "#059669" : "#6366F1"} 
           />
-          <Text style={[styles.typeText, { color: isPublic ? "#059669" : "#6366F1" }]}>
-            {isPublic ? "Public" : "Private"}
+          <Text style={[styles.typeText, { color: item.isPublic ? "#059669" : "#6366F1" }]}>
+            {item.isPublic ? "Public" : "Private"}
           </Text>
         </View>
       </View>
 
-      {/* Info Section */}
       <View style={styles.infoSection}>
         <View style={styles.infoRow}>
-          <View style={[styles.iconCircle, { backgroundColor: theme.bg }]}>
-            <Ionicons name="calendar" size={12} color={theme.primary} />
-          </View>
+          <Ionicons name="calendar-outline" size={14} color="#64748B" />
           <Text style={styles.infoText}>{item.date} • {item.time}</Text>
         </View>
 
-        {(item.locationName || item.location) && (
-          <View style={styles.infoRow}>
-            <View style={[styles.iconCircle, { backgroundColor: theme.bg }]}>
-              <Ionicons name="location" size={12} color={theme.primary} />
-            </View>
-            {item.location && typeof item.location === 'object' ? (
-              <TouchableOpacity 
-                onPress={() => openMap(item.location!.latitude, item.location!.longitude, item.name)}
-                style={styles.locationButton}
-                activeOpacity={0.6}
-              >
-                <Text style={[styles.infoText, { color: theme.primary, textDecorationLine: 'underline' }]} numberOfLines={1}>
-                  {item.locationName || "View on Map"}
-                </Text>
-              </TouchableOpacity>
-            ) : (
-              <Text style={styles.infoText} numberOfLines={1}>{item.locationName}</Text>
-            )}
-          </View>
-        )}
-      </View>
-
-      <View style={styles.divider} />
-
-      {/* Bottom Row */}
-      <View style={styles.bottomRow}>
-        <ParticipantsRow item={item} usersMap={usersMap} />
-        
-        {(isOwner || isAccepted) && (
+        {hasLocation && (
           <TouchableOpacity 
-            style={styles.chatButtonQuiet} 
-            onPress={() => onOpenChat(item)}
+            onPress={() => openMap(item.location!.latitude, item.location!.longitude, item.name)}
+            style={styles.infoRow}
           >
-            <Ionicons 
-              name="chatbubble-ellipses-outline" // Контурна іконка легша за залиту
-              size={22} 
-              color="#94A3B8" // Нейтральний сірий (Slate 400)
-            />
+            <Ionicons name="location-outline" size={14} color={theme.primary} />
+            <Text style={[styles.infoText, { color: theme.primary, fontWeight: '700' }]} numberOfLines={1}>
+              {item.locationName || "View on Map"}
+            </Text>
           </TouchableOpacity>
         )}
       </View>
 
-      {isInvited && (
+      {/* Екшени для My Events (Invited) */}
+      {mode === 'my-events' && isInvited && (
         <View style={styles.inviteActions}>
-          <TouchableOpacity style={styles.declineBtn} onPress={() => onDecline(item.id)}>
+          <TouchableOpacity style={styles.declineBtn} onPress={() => onDecline?.(item.id)}>
             <Text style={styles.declineText}>Decline</Text>
           </TouchableOpacity>
-          <TouchableOpacity 
-            style={[styles.acceptBtn, { backgroundColor: theme.primary }]} 
-            onPress={() => onAccept(item.id)}
-          >
+          <TouchableOpacity style={[styles.acceptBtn, { backgroundColor: theme.primary }]} onPress={() => onAccept?.(item.id)}>
             <Text style={styles.acceptText}>Accept</Text>
           </TouchableOpacity>
         </View>
       )}
 
-      {status === "Past" && (
-        <Text style={styles.pastLabel}>Event Ended</Text>
+      {/* Екшени для Discover (Join/Leave) */}
+      {mode === 'discover' && !isOwner && (
+        <TouchableOpacity 
+          style={[styles.mainBtn, isAccepted ? styles.btnJoined : { backgroundColor: theme.primary }]} 
+          onPress={() => onJoinToggle?.(item.id)}
+        >
+          <Text style={[styles.mainBtnText, isAccepted && { color: "#64748B" }]}>
+            {isAccepted ? "Going ✓" : "Join Event"}
+          </Text>
+        </TouchableOpacity>
       )}
+
+      <View style={styles.divider} />
+
+      <View style={styles.bottomRow}>
+        <ParticipantsRow item={item} usersMap={usersMap} />
+        <View style={styles.actionGroup}>
+          {(isOwner || isAccepted) && onOpenChat && (
+            <TouchableOpacity style={styles.iconBtn} onPress={() => onOpenChat(item)}>
+              <Ionicons name="chatbubble-ellipses-outline" size={22} color="#94A3B8" />
+            </TouchableOpacity>
+          )}
+          {isOwner && onDelete && (
+            <TouchableOpacity onPress={handleDelete} style={styles.iconBtn}>
+              <Ionicons name="trash-outline" size={22} color="#F87171" />
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
     </View>
   );
 }
@@ -198,57 +201,44 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: "#fff",
     borderRadius: 20,
-    padding: 14,
-    marginBottom: 12,
+    padding: 16,
+    marginBottom: 16,
     marginHorizontal: 16,
+    borderLeftWidth: 5,
     ...Platform.select({
-      ios: { shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.06, shadowRadius: 8 },
-      android: { elevation: 2 },
+      ios: { shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.07, shadowRadius: 10 },
+      android: { elevation: 3 },
     }),
   },
-  eventHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    marginBottom: 12,
-  },
-  eventName: { fontSize: 18, fontWeight: "800", color: "#0F172A", letterSpacing: -0.3 },
-  categoryLabel: { fontSize: 11, fontWeight: "800", textTransform: "uppercase", marginTop: 1 },
-  typeBadge: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, borderWidth: 1 },
+  eventHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 },
+  eventName: { fontSize: 19, fontWeight: "800", color: "#1E293B", marginTop: 4 },
+  badge: { alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
+  badgeText: { fontSize: 10, fontWeight: "800", textTransform: "uppercase" },
+  typeBadge: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, borderWidth: 1 },
   publicBadge: { backgroundColor: "#ECFDF5", borderColor: "#A7F3D0" },
   privateBadge: { backgroundColor: "#EEF2FF", borderColor: "#C7D2FE" },
   typeText: { fontSize: 9, fontWeight: "800", textTransform: "uppercase" },
-
-  infoSection: { gap: 8, marginBottom: 14 },
-  infoRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  iconCircle: { width: 26, height: 26, borderRadius: 8, justifyContent: "center", alignItems: "center" },
-  infoText: { fontSize: 13, color: "#475569", fontWeight: "600", flexShrink: 1 },
-  locationButton: { flex: 1, justifyContent: "center" },
-  
+  infoSection: { gap: 6, marginBottom: 14 },
+  infoRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  infoText: { fontSize: 13, color: "#475569", fontWeight: "600" },
   divider: { height: 1, backgroundColor: "#F1F5F9", marginBottom: 12 },
-  
   bottomRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  chatButton: { width: 38, height: 38, borderRadius: 12, justifyContent: "center", alignItems: "center", borderWidth: 1.5 },
   participantRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   avatarsGroup: { flexDirection: "row" },
-  avatar: { width: 28, height: 28, borderRadius: 14, borderWidth: 2, borderColor: "#fff", justifyContent: "center", alignItems: "center", marginRight: -8 },
+  avatar: { width: 28, height: 28, borderRadius: 14, borderWidth: 2, borderColor: "#fff", justifyContent: "center", alignItems: "center", marginRight: -10 },
   avatarText: { fontSize: 10, fontWeight: "800", color: "#1E293B" },
-  remainingAvatar: { backgroundColor: "#F8FAFC", zIndex: 0, borderWidth: 1, borderColor: "#E2E8F0" },
+  remainingAvatar: { backgroundColor: "#F1F5F9", zIndex: 0, borderWidth: 1, borderColor: "#E2E8F0" },
   remainingText: { fontSize: 9, fontWeight: "700", color: "#94A3B8" },
-  participantsCount: { fontSize: 12, color: "#64748B", marginLeft: 10, fontWeight: "500" },
-
-  inviteActions: { flexDirection: "row", gap: 10, marginTop: 14 },
-  acceptBtn: { flex: 2, paddingVertical: 10, borderRadius: 12, alignItems: "center" },
+  participantsCount: { fontSize: 12, color: "#64748B", marginLeft: 12, fontWeight: "600" },
+  actionGroup: { flexDirection: "row", gap: 10 },
+  iconBtn: { padding: 4 },
+  inviteActions: { flexDirection: "row", gap: 10, marginBottom: 14 },
+  acceptBtn: { flex: 2, height: 40, borderRadius: 10, justifyContent: "center", alignItems: "center" },
   acceptText: { color: "#fff", fontWeight: "800", fontSize: 14 },
-  declineBtn: { flex: 1, backgroundColor: "#F8FAFC", borderWidth: 1, borderColor: "#E2E8F0", paddingVertical: 10, borderRadius: 12, alignItems: "center" },
+  declineBtn: { flex: 1, backgroundColor: "#F8FAFC", borderWidth: 1, borderColor: "#E2E8F0", borderRadius: 10, justifyContent: "center", alignItems: "center" },
   declineText: { color: "#64748B", fontWeight: "700", fontSize: 14 },
-  pastLabel: { marginTop: 8, fontSize: 10, color: "#94A3B8", textAlign: "center", fontWeight: "700", textTransform: "uppercase" },
-  chatButtonQuiet: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "transparent", // Жодних фонів
-  },
+  // Нові стилі для Discover кнопки
+  mainBtn: { height: 44, borderRadius: 12, justifyContent: "center", alignItems: "center", marginBottom: 14 },
+  btnJoined: { backgroundColor: "#F1F5F9", borderWidth: 1, borderColor: "#E2E8F0" },
+  mainBtnText: { color: "#FFF", fontWeight: "800", fontSize: 15 },
 });

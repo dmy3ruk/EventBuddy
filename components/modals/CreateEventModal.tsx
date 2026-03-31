@@ -84,6 +84,20 @@ export default function CreateEventModal({ visible, closeModal }: Props) {
   const handleSave = async () => {
     if (!name.trim() || !selectedCategory) return;
 
+    // Combine date + time into one Date object
+    const combined = new Date(
+      date.getFullYear(),
+      date.getMonth(),
+      date.getDate(),
+      time.getHours(),
+      time.getMinutes()
+    );
+  
+    if (combined <= new Date()) {
+      alert("Please choose a date and time in the future.");
+      return;
+    }
+    
     await createEventWithChat({
       name: name.trim(),
       date: date.toISOString().split("T")[0],
@@ -201,22 +215,37 @@ export default function CreateEventModal({ visible, closeModal }: Props) {
 
             {pickerMode && (
               <View style={styles.pickerContainer}>
-                <DateTimePicker
-                  value={pickerMode === "date" ? date : time}
-                  mode={pickerMode}
-                  display={Platform.OS === "ios" ? "spinner" : "default"}
-                  onChange={(_event: any, selected?: Date) => {
-                    if (!selected) {
-                      setPickerMode(null);
-                      return;
-                    }
-
-                    if (pickerMode === "date") setDate(selected);
-                    else setTime(selected);
-
+                // Replace your DateTimePicker with this:
+              <DateTimePicker
+                value={pickerMode === "date" ? date : time}
+                mode={pickerMode}
+                display={Platform.OS === "ios" ? "spinner" : "default"}
+                minimumDate={pickerMode === "date" ? new Date() : undefined}
+                onChange={(_event: any, selected?: Date) => {
+                  if (!selected) {
                     setPickerMode(null);
-                  }}
-                />
+                    return;
+                  }
+
+                  if (pickerMode === "date") {
+                    setDate(selected);
+                  } else {
+                    // If selected date is today, prevent past times
+                    const now = new Date();
+                    const isToday =
+                      date.toDateString() === now.toDateString();
+
+                    if (isToday && selected < now) {
+                      // Round up to current time
+                      setTime(now);
+                    } else {
+                      setTime(selected);
+                    }
+                  }
+
+                  setPickerMode(null);
+                }}
+              />
               </View>
             )}
 
