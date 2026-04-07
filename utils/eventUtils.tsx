@@ -1,8 +1,6 @@
 import { getAuth } from "firebase/auth";
-import { EventType } from "./types";
+import {EventFull, EventType} from "./types";
 
-// якщо ти імпортуєш Timestamp з firestore – можна явно типізувати
-// import type { Timestamp } from "firebase/firestore";
 
 type AnyDate = string | Date | { toDate?: () => Date } | null | undefined;
 
@@ -43,7 +41,7 @@ export function isToday(dateRaw: AnyDate) {
     return d.getTime() === todayDate().getTime();
 }
 
-export function getTodayEvent(events: EventType[]) {
+export function getTodayEvent(events: EventFull[]) {
     const uid = getUID();
     return (
         events.find(
@@ -54,12 +52,12 @@ export function getTodayEvent(events: EventType[]) {
     );
 }
 
-export function getParticipants(event: EventType) {
+export function getParticipants(event: EventFull) {
     const participants = [event.userId, ...(event.acceptedUserIds || [])];
     return Array.from(new Set(participants));
 }
 
-export function getEventStatus(event: EventType, uid: string) {
+export function getEventStatus(event: EventFull, uid: string) {
     const today = todayDate();
     const eventDate = normalizeDate(event.date as any);
 
@@ -74,7 +72,7 @@ export function getEventStatus(event: EventType, uid: string) {
 }
 
 export function filterEventsByTab(
-    events: EventType[],
+    events: EventFull[],
     tab: "Upcoming" | "Invitings" | "My Events",
     uid: string
 ) {

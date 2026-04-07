@@ -8,50 +8,46 @@ import {
 } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 import { db } from "../FirebaseConfig";
+import { EventType } from "./types";
 
-type CreateEventPayload = {
-    name: string;
-    date: string; // YYYY-MM-DD
-    time: string; // HH:MM
-    category: string; // ✅ ОБОВʼЯЗКОВО
-    friends?: string;
-    details?: string;
-    invitedUserIds?: string[];
-    isPublic: boolean;
-    location?: {
-        latitude: number;
-        longitude: number;
-    };
-};
-
-export async function createEventWithChat(payload: CreateEventPayload) {
+export async function createEventWithChat(payload: EventType) {
     const user = getAuth().currentUser;
-    if (!user) throw new Error("No authenticated user");
+    if (!user) throw new Error("Користувач не авторизований");
 
-    // 1️⃣ створюємо подію
-    const eventRef = await addDoc(collection(db, "events"), {
+    // Створюємо об'єкт для бази даних на основі EventType
+    const eventData = {
         name: payload.name,
         date: payload.date,
         time: payload.time,
         category: payload.category,
-        friends: payload.friends || "",
         details: payload.details || "",
-        userId: user.uid,
+        userId: user.uid, // Організатор
+        isPublic: payload.isPublic,
         invitedUserIds: payload.invitedUserIds || [],
         acceptedUserIds: [user.uid],
-        isPublic: payload.isPublic,
-        location: payload.location || undefined,
         createdAt: serverTimestamp(),
-    });
+    };
 
-    // 2️⃣ створюємо чат
+    // Додаємо локацію тільки якщо вона реально є
+    if (payload.location) {
+        (eventData as any).location = {
+            latitude: payload.location.latitude,
+            longitude: payload.location.longitude,
+            name: payload.location.name || "Somewhere"
+        };
+    }
+
+    // Створюємо документ події
+    const eventRef = await addDoc(collection(db, "events"), eventData);
+
+    // Створюємо перше системне повідомлення в чаті
     await addDoc(collection(db, "events", eventRef.id, "messages"), {
-        text: "Chat created",
-        userId: "system",
+        text: "Чат створено",
+        type: "system",
         createdAt: serverTimestamp(),
     });
 
-    // 3️⃣ lastRead для організаторки
+    // Оновлюємо статус прочитання для творця
     await setDoc(
         doc(db, "users", user.uid, "chatStatus", eventRef.id),
         {

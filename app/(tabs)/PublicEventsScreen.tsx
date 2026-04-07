@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { 
-    View, Text, StyleSheet, FlatList, TouchableOpacity, 
+import {
+    View, Text, StyleSheet, FlatList, TouchableOpacity,
     ScrollView, Platform, StatusBar, ActivityIndicator
 } from "react-native";
 import * as Haptics from 'expo-haptics';
@@ -11,17 +11,17 @@ import { EVENT_CATEGORIES } from "../../utils/categories";
 import { EventFull } from "../../utils/types";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import EventCard from "@/components/events/EventCard";
+import { useRouter } from "expo-router";
+import {useNavigation} from "@react-navigation/native"; // Use only this for Expo Router
 
-import EventCard from "@/components/events/EventCard"; 
-
-// Оновлена палітра під твій акцент #505BEB
 const COLORS = {
-  primary: "#505BEB", 
-  primaryContainer: "rgba(80, 91, 235, 0.1)", // Світлий відтінок для фону кнопок/чіпів
-  surface: "#F8FAFC", // Чистий світлий фон, як на HomeScreen
-  onSurface: "#1A1A1A",
-  outline: "#64748B",
-  white: "#FFFFFF",
+    primary: "#505BEB",
+    primaryContainer: "rgba(80, 91, 235, 0.1)",
+    surface: "#F8FAFC",
+    onSurface: "#1A1A1A",
+    outline: "#64748B",
+    white: "#FFFFFF",
 };
 
 export default function PublicEventsScreen() {
@@ -29,7 +29,9 @@ export default function PublicEventsScreen() {
     const [activeCategory, setActiveCategory] = useState("All");
     const [loading, setLoading] = useState(true);
     const uid = getAuth().currentUser?.uid;
+    const router = useRouter();
 
+    const navigation = useNavigation<any>();
     useEffect(() => {
         const q = query(
             collection(db, "events"),
@@ -45,7 +47,7 @@ export default function PublicEventsScreen() {
     }, []);
 
     const filteredEvents = useMemo(() => {
-        const todayStr = new Date().toISOString().split('T')[0]; 
+        const todayStr = new Date().toISOString().split('T')[0];
         return events.filter(e => {
             if (e.date < todayStr) return false;
             if (activeCategory !== "All" && e.category !== activeCategory) return false;
@@ -56,7 +58,7 @@ export default function PublicEventsScreen() {
     const handleJoinToggle = async (eventId: string) => {
         if (!uid) return;
         if (Platform.OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-        
+
         const event = events.find(e => e.id === eventId);
         const joined = event?.acceptedUserIds?.includes(uid);
         const ref = doc(db, "events", eventId);
@@ -73,23 +75,25 @@ export default function PublicEventsScreen() {
     return (
         <SafeAreaView style={styles.safeArea} edges={['top']}>
             <StatusBar barStyle="dark-content" />
-            
-            {/* Header Area */}
+
             <View style={styles.header}>
                 <View>
                     <Text style={styles.overtitle}>Discovery</Text>
                     <Text style={styles.title}>Find your vibe</Text>
                 </View>
-                <TouchableOpacity style={styles.filterBtn}>
-                    <MaterialCommunityIcons name="tune-variant" size={22} color={COLORS.primary} />
+                <TouchableOpacity
+                    style={styles.filterBtn}
+                    onPress={() => navigation.navigate("Calendar")}
+                    activeOpacity={0.7}
+                >
+                    <MaterialCommunityIcons name="calendar-month" size={24} color={COLORS.primary} />
                 </TouchableOpacity>
             </View>
 
-            {/* Horizontal Categories */}
             <View style={styles.filterSection}>
-                <ScrollView 
-                    horizontal 
-                    showsHorizontalScrollIndicator={false} 
+                <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
                     contentContainerStyle={styles.chipsContent}
                 >
                     {["All", ...EVENT_CATEGORIES].map((cat) => (
@@ -100,20 +104,20 @@ export default function PublicEventsScreen() {
                                 Haptics.selectionAsync();
                             }}
                             style={[
-                                styles.chip, 
+                                styles.chip,
                                 activeCategory === cat && styles.chipActive
                             ]}
                         >
                             {cat === "All" && (
-                                <MaterialCommunityIcons 
-                                    name="earth" 
-                                    size={16} 
-                                    color={activeCategory === cat ? COLORS.white : COLORS.primary} 
+                                <MaterialCommunityIcons
+                                    name="earth"
+                                    size={16}
+                                    color={activeCategory === cat ? COLORS.white : COLORS.primary}
                                     style={{ marginRight: 6 }}
                                 />
                             )}
                             <Text style={[
-                                styles.chipText, 
+                                styles.chipText,
                                 activeCategory === cat && styles.chipTextActive
                             ]}>
                                 {cat}
@@ -123,7 +127,6 @@ export default function PublicEventsScreen() {
                 </ScrollView>
             </View>
 
-            {/* Events List */}
             {loading ? (
                 <View style={styles.center}>
                     <ActivityIndicator size="large" color={COLORS.primary} />
@@ -134,9 +137,9 @@ export default function PublicEventsScreen() {
                     keyExtractor={(item) => item.id}
                     renderItem={({ item }) => (
                         <View style={styles.cardWrapper}>
-                            <EventCard 
-                                item={item} 
-                                uid={uid || ""} 
+                            <EventCard
+                                item={item}
+                                uid={uid || ""}
                                 mode="discover"
                                 onJoinToggle={handleJoinToggle}
                             />
@@ -150,8 +153,8 @@ export default function PublicEventsScreen() {
                                 <MaterialCommunityIcons name="map-marker-off-outline" size={48} color={COLORS.outline} />
                             </View>
                             <Text style={styles.emptyText}>No events in this category yet</Text>
-                            <TouchableOpacity 
-                                style={styles.resetBtn} 
+                            <TouchableOpacity
+                                style={styles.resetBtn}
                                 onPress={() => setActiveCategory("All")}
                             >
                                 <Text style={styles.resetBtnText}>Show all events</Text>
@@ -165,17 +168,17 @@ export default function PublicEventsScreen() {
 }
 
 const styles = StyleSheet.create({
-    safeArea: { 
-        flex: 1, 
-        backgroundColor: COLORS.surface 
+    safeArea: {
+        flex: 1,
+        backgroundColor: COLORS.surface
     },
-    header: { 
+    header: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        paddingHorizontal: 24, 
-        paddingTop: 10, 
-        marginBottom: 15 
+        paddingHorizontal: 24,
+        paddingTop: 10,
+        marginBottom: 15
     },
     overtitle: {
         fontSize: 12,
@@ -185,32 +188,28 @@ const styles = StyleSheet.create({
         letterSpacing: 1.5,
         marginBottom: 2
     },
-    title: { 
-        fontSize: 32, 
-        fontWeight: "900", 
-        color: COLORS.onSurface, 
-        letterSpacing: -1 
-    },
+    title: { fontSize: 32, fontWeight: "800", color: COLORS.onSurface, letterSpacing: -0.5 },
+
     filterBtn: {
         backgroundColor: COLORS.primaryContainer,
         padding: 12,
         borderRadius: 16,
     },
-    filterSection: { 
-        marginBottom: 10 
+    filterSection: {
+        marginBottom: 10
     },
-    chipsContent: { 
-        paddingHorizontal: 20, 
+    chipsContent: {
+        paddingHorizontal: 20,
         paddingVertical: 5,
-        gap: 8 
+        gap: 8
     },
-    chip: { 
+    chip: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: 16, 
-        height: 44, 
-        borderRadius: 22, 
-        backgroundColor: COLORS.white, 
+        paddingHorizontal: 16,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: COLORS.white,
         borderWidth: 1,
         borderColor: COLORS.primaryContainer,
         elevation: 2,
@@ -219,22 +218,22 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.05,
         shadowRadius: 5,
     },
-    chipActive: { 
-        backgroundColor: COLORS.primary, 
-        borderColor: COLORS.primary 
+    chipActive: {
+        backgroundColor: COLORS.primary,
+        borderColor: COLORS.primary
     },
-    chipText: { 
-        fontSize: 14, 
-        fontWeight: "700", 
-        color: COLORS.outline 
+    chipText: {
+        fontSize: 14,
+        fontWeight: "700",
+        color: COLORS.outline
     },
-    chipTextActive: { 
-        color: COLORS.white 
+    chipTextActive: {
+        color: COLORS.white
     },
-    listContent: { 
+    listContent: {
         paddingBottom: 40,
-        paddingTop: 10 
-    }, 
+        paddingTop: 10
+    },
     cardWrapper: {
         marginBottom: 8,
     },
@@ -243,10 +242,10 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center'
     },
-    emptyContainer: { 
-        alignItems: 'center', 
+    emptyContainer: {
+        alignItems: 'center',
         marginTop: 60,
-        paddingHorizontal: 40 
+        paddingHorizontal: 40
     },
     emptyIconCircle: {
         width: 100,
@@ -257,9 +256,9 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         marginBottom: 20
     },
-    emptyText: { 
-        fontSize: 16, 
-        color: COLORS.outline, 
+    emptyText: {
+        fontSize: 16,
+        color: COLORS.outline,
         fontWeight: '600',
         textAlign: 'center',
         lineHeight: 24,

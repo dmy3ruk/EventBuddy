@@ -1,259 +1,309 @@
 import React, { useEffect, useMemo, useState } from "react";
-import {
-    View,
-    StyleSheet,
-    Text,
-    FlatList,
-    SafeAreaView,
-    TouchableOpacity,
-} from "react-native";
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, StatusBar,
+    Platform, LayoutAnimation } from "react-native";
 import { Calendar } from "react-native-calendars";
 import { getAuth } from "firebase/auth";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
 import { db } from "../../FirebaseConfig";
+import { EventFull } from "../../utils/types";
+import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
-import { EventType } from "../../utils/types";
-type DayPress = {
-    dateString: string;
-    day: number;
-    month: number;
-    year: number;
-    timestamp: number;
-};
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import * as Haptics from 'expo-haptics';
+import EventCard from "../../components/events/EventCard";
+import CreateEventModal from "../../components/modals/CreateEventModal";
 
-type EventsByDate = {
-    [date: string]: EventType[];
+const COLORS = {
+    primary: "#505BEB",
+    bg: "#F8FAFC",
+    white: "#FFFFFF",
+    textMain: "#0F172A",
+    textMuted: "#64748B",
+    border: "#F1F5F9",
+    success: "#16A34A",
 };
 
 export default function CalendarScreen() {
-    const [selectedDate, setSelectedDate] = useState<string>("");
-    const [eventsByDate, setEventsByDate] = useState<EventsByDate>({});
-    const [loading, setLoading] = useState(false);
+    const insets = useSafeAreaInsets();
     const navigation = useNavigation<any>();
+    const today = useMemo(() => new Date().toISOString().split('T')[0], []);
+    const [selectedDate, setSelectedDate] = useState<string>(today);
+    const [eventsByDate, setEventsByDate] = useState<{ [key: string]: EventFull[] }>({});
+    const [isModalVisible, setModalVisible] = useState(false);
 
+    const uid = getAuth().currentUser?.uid;
+
+    // Слухаємо зміни в Firestore та групуємо події за датами
     useEffect(() => {
-        const fetchEvents = async () => {
-            try {
-                setLoading(true);
-                const user = getAuth().currentUser;
-                if (!user) return;
+        if (!uid) return;
+        const q = query(collection(db, "events"), orderBy("time", "asc"));
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const grouped: { [key: string]: EventFull[] } = {};
 
-                const snapshot = await getDocs(collection(db, "events"));
+            snapshot.docs.forEach((docSnap) => {
+                const data = docSnap.data() as EventFull;
+                // Фільтруємо події, де користувач є автором або учасником
+                if (data.userId === uid || (data.acceptedUserIds || []).includes(uid)) {
+                    const date = data.date;
+                    if (!grouped[date]) grouped[date] = [];
+                    grouped[date].push({ ...data, id: docSnap.id });
+                }
+            });
 
-                const allEvents: EventType[] = snapshot.docs.map((docSnap) => {
-                    const data = docSnap.data() as any;
-                    return {
-                        id: docSnap.id,
-                        name: data.name,
-                        date: data.date,
-                        time: data.time,
-                        details: data.details,
-                        userId: data.userId,
-                        invitedUserIds: data.invitedUserIds || [],
-                    };
-                });
-
-                const currentUid = user.uid;
-                const myRelevantEvents = allEvents.filter(
-                    (ev) =>
-                        ev.userId === currentUid ||
-                        ev.invitedUserIds?.includes(currentUid)
-                );
-
-                const grouped: EventsByDate = {};
-                myRelevantEvents.forEach((ev) => {
-                    if (!ev.date) return;
-                    if (!grouped[ev.date]) grouped[ev.date] = [];
-                    grouped[ev.date].push(ev);
-                });
-
-                setEventsByDate(grouped);
-            } catch (e) {
-                console.log("Error loading events for calendar:", e);
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        fetchEvents();
-    }, []);
-
-    const markedDates = useMemo(() => {
-        const marks: { [date: string]: any } = {};
-
-        Object.keys(eventsByDate).forEach((date) => {
-            marks[date] = {
-                ...(marks[date] || {}),
-                marked: true,
-                dotColor: "#505BEB",
-            };
+            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+            setEventsByDate(grouped);
         });
+        return () => unsubscribe();
+    }, [uid]);
 
-        if (selectedDate) {
-            marks[selectedDate] = {
-                ...(marks[selectedDate] || {}),
-                selected: true,
-                selectedColor: "#505BEB",
-            };
-        }
-
+    // Формуємо об'єкт маркування для календаря
+    const markedDates = useMemo(() => {
+        const marks: any = {};
+        Object.keys(eventsByDate).forEach((date) => {
+            marks[date] = { marked: true, dotColor: COLORS.primary };
+        });
+        marks[selectedDate] = {
+            ...marks[selectedDate],
+            selected: true,
+            selectedColor: COLORS.primary
+        };
         return marks;
     }, [eventsByDate, selectedDate]);
 
-    const eventsForSelectedDate = selectedDate
-        ? eventsByDate[selectedDate] || []
-        : [];
+    const eventsForSelectedDate = eventsByDate[selectedDate] || [];
 
-    const openChat = (event: EventType) => {
-        navigation.navigate("Chat", {
-            eventId: event.id,
-            name: event.name,
-            date: event.date,
-            time: event.time,
-            participantsCount: 1,
-        });
+    const handleBack = () => {
+        navigation.navigate("Public Events");
     };
 
-    const renderEventItem = ({ item }: { item: EventType }) => (
-        <TouchableOpacity
-            style={styles.eventCard}
-            onPress={() => openChat(item)}
-        >
-            <Text style={styles.eventName}>{item.name}</Text>
-            <Text style={styles.eventMeta}>
-                {item.time} {item.details ? `• ${item.details}` : ""}
-            </Text>
-
-                <TouchableOpacity
-                    style={styles.chatButton}
-                    onPress={() => openChat(item)}
-                >
-                <Text style={styles.chatButtonText}>Open chat</Text>
-            </TouchableOpacity>
-        </TouchableOpacity>
-    );
-
-    const handleDayPress = (day: DayPress) => {
-        setSelectedDate(day.dateString);
+    const goToToday = () => {
+        setSelectedDate(today);
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     };
-
 
     return (
-        <SafeAreaView style={styles.safe}>
-            <View style={styles.container}>
-                <Calendar
-                    style={styles.calendar}
-                    onDayPress={(day: DayPress) => handleDayPress(day)}
-                    markedDates={markedDates}
-                    theme={{
-                        todayTextColor: "#505BEB",
-                        arrowColor: "#505BEB",
-                        monthTextColor: "#505BEB",
-                        selectedDayBackgroundColor: "#505BEB",
-                        selectedDayTextColor: "#FFFFFF",
-                    }}
-                />
+        <View style={[styles.container, { paddingTop: insets.top }]}>
+            <StatusBar barStyle="dark-content" />
 
-                <View style={styles.eventsContainer}>
-                    {loading && (
-                        <Text style={styles.infoText}>Loading events...</Text>
-                    )}
-
-                    {!loading && !selectedDate && (
-                        <Text style={styles.infoText}>
-                            Tap on a date to see events.
-                        </Text>
-                    )}
-
-                    {!loading && selectedDate && eventsForSelectedDate.length === 0 && (
-                        <Text style={styles.infoText}>
-                            No events for {selectedDate}.
-                        </Text>
-                    )}
-
-                    {!loading && eventsForSelectedDate.length > 0 && (
-                        <>
-                            <Text style={styles.eventsTitle}>
-                                Events on {selectedDate}
-                            </Text>
-                            <FlatList
-                                data={eventsForSelectedDate}
-                                keyExtractor={(item) => item.id}
-                                renderItem={renderEventItem}
-                                contentContainerStyle={{ paddingVertical: 8 }}
-                            />
-                        </>
-                    )}
+            {/* Header*/}
+            <View style={styles.header}>
+                <View style={styles.headerLeft}>
+                    <TouchableOpacity style={styles.backBtn} onPress={handleBack}>
+                        <Feather name="chevron-left" size={28} color={COLORS.textMain} />
+                    </TouchableOpacity>
+                    <View style={styles.headerTextContainer}>
+                        <Text style={styles.headerLabel}>PLAN YOUR</Text>
+                        <Text style={styles.headerTitle}>Timeline</Text>
+                    </View>
                 </View>
+
+                {selectedDate !== today && (
+                    <TouchableOpacity style={styles.todayBtn} onPress={goToToday}>
+                        <Text style={styles.todayBtnText}>Today</Text>
+                    </TouchableOpacity>
+                )}
             </View>
-        </SafeAreaView>
+
+            <FlatList
+                data={eventsForSelectedDate}
+                keyExtractor={(item) => item.id}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 100 }]}
+                ListHeaderComponent={
+                    <View style={styles.topSection}>
+                        {/* Картка календаря */}
+                        <View style={styles.calendarCard}>
+                            <Calendar
+                                current={selectedDate}
+                                onDayPress={(day) => {
+                                    setSelectedDate(day.dateString);
+                                    Haptics.selectionAsync();
+                                }}
+                                markedDates={markedDates}
+                                theme={{
+                                    calendarBackground: 'transparent',
+                                    selectedDayBackgroundColor: COLORS.primary,
+                                    selectedDayTextColor: COLORS.white,
+                                    todayTextColor: COLORS.primary,
+                                    dayTextColor: COLORS.textMain,
+                                    monthTextColor: COLORS.textMain,
+                                    textMonthFontWeight: '800',
+                                    arrowColor: COLORS.primary,
+                                }}
+                                enableSwipeMonths
+                            />
+                        </View>
+
+                        {/* Інформаційний заголовок списку */}
+                        <View style={styles.listHeader}>
+                            <View style={styles.titleRow}>
+                                <Text style={styles.sectionTitle}>Plans for this day</Text>
+                                {eventsForSelectedDate.length > 0 && (
+                                    <View style={styles.badge}>
+                                        <Text style={styles.badgeText}>{eventsForSelectedDate.length}</Text>
+                                    </View>
+                                )}
+                            </View>
+                            <Text style={styles.dateSub}>
+                                {new Date(selectedDate).toLocaleDateString('en-US', {
+                                    weekday: 'long', month: 'short', day: 'numeric'
+                                })}
+                            </Text>
+                        </View>
+                    </View>
+                }
+                renderItem={({ item }) => (
+                    <View style={styles.timelineRow}>
+                        {/* Таймлайн */}
+                        <View style={styles.timelineSidebar}>
+                            <View style={styles.dot} />
+                            <View style={styles.line} />
+                        </View>
+                        <View style={styles.cardWrapper}>
+                            <EventCard item={item} uid={uid || ""} mode="discover" />
+                        </View>
+                    </View>
+                )}
+                ListEmptyComponent={
+                    <View style={styles.emptyState}>
+                        <View style={styles.emptyIconCircle}>
+                            <MaterialCommunityIcons name="calendar-blank" size={40} color={COLORS.textMuted} />
+                        </View>
+                        <Text style={styles.emptyTitle}>No plans for this date</Text>
+                        <Text style={styles.emptySubText}>Enjoy your free time or tap 'New Event' below</Text>
+                    </View>
+                }
+            />
+
+            {/* CTA */}
+            <TouchableOpacity
+                activeOpacity={0.9}
+                style={[styles.fab, { bottom: insets.bottom + 20 }]}
+                onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                    setModalVisible(true);
+                }}
+            >
+                <Feather name="plus" size={24} color={COLORS.white} />
+                <Text style={styles.fabText}>New Event</Text>
+            </TouchableOpacity>
+
+            {/* Модалка створення події з прокиданням обраної дати */}
+            <CreateEventModal
+                visible={isModalVisible}
+                closeModal={() => setModalVisible(false)}
+                initialDate={selectedDate}
+            />
+        </View>
     );
 }
 
 const styles = StyleSheet.create({
-    safe: {
-        flex: 1,
-        backgroundColor: "#F9F9F9",
-    },
-    container: {
-        flex: 1,
+    container: { flex: 1, backgroundColor: COLORS.bg },
+    header: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
         paddingHorizontal: 16,
-        paddingTop: 24,
+        paddingVertical: 12,
     },
-    calendar: {
-        borderWidth: 1,
-        padding: 8,
-        borderColor: "#E2E8F0",
-        borderRadius: 16,
-        width: "100%",
-        backgroundColor: "#FFFFFF",
-    },
-    eventsContainer: {
-        marginTop: 16,
-        flex: 1,
-    },
-    infoText: {
-        textAlign: "center",
-        color: "#6E7D93",
-        marginTop: 8,
-    },
-    eventsTitle: {
-        fontSize: 16,
-        fontWeight: "600",
-        marginBottom: 8,
-        color: "#000",
-    },
-    eventCard: {
-        backgroundColor: "#FFFFFF",
-        borderRadius: 12,
-        padding: 12,
-        borderWidth: 0.5,
-        borderColor: "#E2E8F0",
-        marginBottom: 8,
-    },
-    eventName: {
-        fontSize: 15,
-        fontWeight: "600",
-        marginBottom: 2,
-        color: "#000",
-    },
-    eventMeta: {
-        fontSize: 13,
-        color: "#6E7D93",
-    },
-    chatButton: {
-        marginTop: 8,
-        alignSelf: "flex-start",
+    headerLeft: { flexDirection: 'row', alignItems: 'center' },
+    backBtn: { marginRight: 8, marginLeft: -4 },
+    headerTextContainer: { justifyContent: 'center' },
+    headerLabel: { fontSize: 10, fontWeight: '800', color: COLORS.primary, letterSpacing: 1 },
+    headerTitle: { fontSize: 28, fontWeight: '800', color: COLORS.textMain, marginTop: -4 },
+
+    todayBtn: {
+        backgroundColor: COLORS.white,
         paddingHorizontal: 12,
         paddingVertical: 6,
-        borderRadius: 8,
-        borderWidth: 0.5,
-        borderColor: "#505BEB",
-        backgroundColor: "#EEF2FF",
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: COLORS.border,
     },
-    chatButtonText: {
-        color: "#505BEB",
-        fontSize: 13,
-        fontWeight: "500",
+    todayBtnText: { fontSize: 13, fontWeight: '700', color: COLORS.primary },
+
+    topSection: { paddingHorizontal: 16 },
+    calendarCard: {
+        backgroundColor: COLORS.white,
+        borderRadius: 24,
+        padding: 10,
+        marginVertical: 16,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.04,
+        shadowRadius: 12,
+        elevation: 3,
     },
+
+    listContent: { paddingHorizontal: 16 },
+    listHeader: { marginBottom: 20, paddingLeft: 34 },
+    titleRow: { flexDirection: 'row', alignItems: 'center' },
+    sectionTitle: { fontSize: 18, fontWeight: '800', color: COLORS.textMain },
+    dateSub: { fontSize: 13, color: COLORS.textMuted, marginTop: 2, fontWeight: '500' },
+    badge: {
+        backgroundColor: COLORS.primary,
+        paddingHorizontal: 8,
+        height: 20,
+        borderRadius: 10,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginLeft: 8,
+    },
+    badgeText: { color: COLORS.white, fontSize: 11, fontWeight: '800' },
+
+    timelineRow: { flexDirection: 'row', marginBottom: 12 },
+    timelineSidebar: { width: 34, alignItems: 'center' },
+    dot: {
+        width: 10,
+        height: 10,
+        borderRadius: 5,
+        backgroundColor: COLORS.primary,
+        marginTop: 24,
+        zIndex: 2
+    },
+    line: {
+        position: 'absolute',
+        top: 34,
+        bottom: -12,
+        width: 2,
+        backgroundColor: COLORS.border,
+        zIndex: 1
+    },
+    cardWrapper: { flex: 1 },
+
+    emptyState: { alignItems: 'center', marginTop: 40, paddingHorizontal: 40 },
+    emptyIconCircle: {
+        width: 80,
+        height: 80,
+        borderRadius: 40,
+        backgroundColor: COLORS.white,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 16,
+        elevation: 2,
+        shadowColor: "#000",
+        shadowOpacity: 0.05,
+        shadowRadius: 10,
+    },
+    emptyTitle: { color: COLORS.textMain, fontSize: 18, fontWeight: '800', marginBottom: 4 },
+    emptySubText: { color: COLORS.textMuted, fontSize: 13, textAlign: 'center' },
+
+    fab: {
+        position: 'absolute',
+        right: 20,
+        flexDirection: 'row',
+        height: 54,
+        paddingHorizontal: 20,
+        backgroundColor: COLORS.success,
+        borderRadius: 27,
+        alignItems: 'center',
+        justifyContent: 'center',
+        elevation: 8,
+        shadowColor: "#000",
+        shadowOpacity: 0.2,
+        shadowRadius: 10,
+        shadowOffset: { width: 0, height: 4 }
+    },
+    fabText: { marginLeft: 10, fontSize: 16, fontWeight: '700', color: COLORS.white },
 });

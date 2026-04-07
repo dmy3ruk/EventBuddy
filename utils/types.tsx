@@ -1,24 +1,27 @@
+// 1. Координати та опис локації
 export type EventLocation = {
     latitude: number;
     longitude: number;
-    name: string;     
+    name?: string;
+    address?: string;
 };
 
-// Базовий інтерфейс 
+// 2. Базовий інтерфейс події (БЕЗ id)
 export interface EventType {
-    id: string;
     name: string;
     date: string;
     time: string;
     userId: string;
     isPublic: boolean;
-    category: string; 
-    details?: string;
+    category: string;
+    details: string;
+    invitedUserIds?: string[];
     acceptedUserIds?: string[];
-    location?: EventLocation;
+    location?: EventLocation | null;
+    createdAt?: string;
 }
 
-// Тип для роботи в додатку (дані + ID)
+// 3. Повна модель події (З обов'язковим ID)
 export interface EventFull extends EventType {
     id: string;
 }
