@@ -1,6 +1,6 @@
 import React, {useEffect, useState, useMemo} from "react";
 import {
-    View, Text, StyleSheet, TouchableOpacity, FlatList, StatusBar, Platform
+    View, Text, StyleSheet, TouchableOpacity, FlatList, StatusBar, Platform, ActivityIndicator
 } from "react-native";
 import {SafeAreaView} from "react-native-safe-area-context";
 import * as Haptics from 'expo-haptics';
@@ -13,7 +13,7 @@ import {useBottomTabBarHeight} from '@react-navigation/bottom-tabs';
 
 import EventCard from "../../components/events/EventCard";
 import CreateEventModal from "../../components/modals/CreateEventModal";
-import {EventFull} from "../../utils/types"; // Використовуємо повний тип з ID
+import {EventFull} from "../../utils/types";
 import {filterEventsByTab, getTodayEvent} from "../../utils/eventUtils";
 import {fetchUsername, acceptInvite, declineInvite} from "../../utils/firestoreHelpers";
 
@@ -26,6 +26,7 @@ const COLORS = {
     white: "#FFFFFF",
     error: "#EF4444",
     tabBg: "#E2E8F0",
+    success: "#16A34A"
 };
 
 export default function HomeScreen() {
@@ -37,8 +38,9 @@ export default function HomeScreen() {
     const [isModalVisible, setModalVisible] = useState(false);
     const [events, setEvents] = useState<EventFull[]>([]);
     const [username, setUsername] = useState<string | null>(null);
+    const [loading, setLoading] = useState(true); // Стан для анімації завантаження
 
-    // Завантажуємо ім'я юзера при старті
+    // Завантажуємо ім'я юзера
     useEffect(() => {
         const loadUser = async () => {
             const name = await fetchUsername();
@@ -49,18 +51,25 @@ export default function HomeScreen() {
 
     // Слухаємо базу даних в реальному часі
     useEffect(() => {
-        const q = query(collection(db, "events"),
-            orderBy("createdAt", "desc"));
-        return onSnapshot(q, (snapshot) => {
+        setLoading(true);
+        const q = query(collection(db, "events"), orderBy("createdAt", "desc"));
+
+        const unsubscribe = onSnapshot(q, (snapshot) => {
             const data = snapshot.docs.map(doc => ({
                 id: doc.id,
                 ...doc.data()
-            } as EventFull)); // Приведення до EventFull вирішує проблему з ID
+            } as EventFull));
             setEvents(data);
+            setLoading(false); // Вимикаємо завантаження після отримання даних
+        }, (error) => {
+            console.error("Firestore error:", error);
+            setLoading(false);
         });
+
+        return () => unsubscribe();
     }, []);
 
-    // Фільтрація подій за обраною вкладкою
+    // Фільтрація подій
     const filteredEvents = useMemo(() => filterEventsByTab(events, activeTab, uid), [events, activeTab, uid]);
     const todayEvent = useMemo(() => getTodayEvent(events), [events]);
 
@@ -69,7 +78,6 @@ export default function HomeScreen() {
         setActiveTab(tab);
     };
 
-    // Навігація в чат конкретної події
     const openChat = (event: EventFull) => {
         if (Platform.OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         navigation.navigate("Chat", {
@@ -86,7 +94,8 @@ export default function HomeScreen() {
 
             <View style={styles.container}>
                 <FlatList
-                    data={filteredEvents.length > 0 ? filteredEvents : [{id: "empty"} as any]}
+                    // Якщо завантажується, передаємо порожній масив, щоб не показувати "No events" передчасно
+                    data={loading ? [] : (filteredEvents.length > 0 ? filteredEvents : [{id: "empty"} as any])}
                     keyExtractor={(item) => item.id}
                     showsVerticalScrollIndicator={false}
                     contentContainerStyle={[styles.listContent, {paddingBottom: tabBarHeight + 100}]}
@@ -103,45 +112,47 @@ export default function HomeScreen() {
                                 </TouchableOpacity>
                             </View>
 
-                            {/* Картка події на сьогодні */}
-                            <View style={styles.todayCard}>
-                                <View style={styles.todayHeader}>
-                                    <View style={styles.liveBadge}>
-                                        <View style={styles.liveDot}/>
-                                        <Text style={styles.liveText}>TODAY</Text>
-                                    </View>
-                                    <Ionicons name="sparkles" size={18} color="#FFD700"/>
-                                </View>
-
-                                {todayEvent ? (
-                                    <View>
-                                        <Text style={styles.todayTitle} numberOfLines={1}>{todayEvent.name}</Text>
-                                        <View style={styles.tagsRow}>
-                                            <View style={styles.tag}>
-                                                <Ionicons name="time-outline" size={14} color="#FFF"/>
-                                                <Text style={styles.tagText}>{todayEvent.time}</Text>
-                                            </View>
-                                            <View style={styles.tag}>
-                                                <Ionicons name="location-outline" size={14} color="#FFF"/>
-                                                <Text style={styles.tagText} numberOfLines={1}>
-                                                    {todayEvent.location?.name || "Somewhere"}
-                                                </Text>
-                                            </View>
+                            {/* Картка події на сьогодні (ховаємо під час завантаження для чистоти) */}
+                            {!loading && (
+                                <View style={styles.todayCard}>
+                                    <View style={styles.todayHeader}>
+                                        <View style={styles.liveBadge}>
+                                            <View style={styles.liveDot}/>
+                                            <Text style={styles.liveText}>TODAY</Text>
                                         </View>
-                                        <TouchableOpacity activeOpacity={0.9} style={styles.todayButton}
-                                                          onPress={() => openChat(todayEvent)}>
-                                            <Text style={styles.todayButtonText}>Open Chat</Text>
-                                            <View style={styles.btnCircle}>
-                                                <Ionicons name="arrow-forward" size={16} color={COLORS.accent}/>
+                                        <Ionicons name="sparkles" size={18} color="#FFD700"/>
+                                    </View>
+
+                                    {todayEvent ? (
+                                        <View>
+                                            <Text style={styles.todayTitle} numberOfLines={1}>{todayEvent.name}</Text>
+                                            <View style={styles.tagsRow}>
+                                                <View style={styles.tag}>
+                                                    <Ionicons name="time-outline" size={14} color="#FFF"/>
+                                                    <Text style={styles.tagText}>{todayEvent.time}</Text>
+                                                </View>
+                                                <View style={styles.tag}>
+                                                    <Ionicons name="location-outline" size={14} color="#FFF"/>
+                                                    <Text style={styles.tagText} numberOfLines={1}>
+                                                        {todayEvent.location?.name || "Somewhere"}
+                                                    </Text>
+                                                </View>
                                             </View>
-                                        </TouchableOpacity>
-                                    </View>
-                                ) : (
-                                    <View style={styles.emptyToday}>
-                                        <Text style={styles.emptyTodayText}>No plans for today. Create an event!</Text>
-                                    </View>
-                                )}
-                            </View>
+                                            <TouchableOpacity activeOpacity={0.9} style={styles.todayButton}
+                                                              onPress={() => openChat(todayEvent)}>
+                                                <Text style={styles.todayButtonText}>Open Chat</Text>
+                                                <View style={styles.btnCircle}>
+                                                    <Ionicons name="arrow-forward" size={16} color={COLORS.accent}/>
+                                                </View>
+                                            </TouchableOpacity>
+                                        </View>
+                                    ) : (
+                                        <View style={styles.emptyToday}>
+                                            <Text style={styles.emptyTodayText}>No plans for today. Create an event!</Text>
+                                        </View>
+                                    )}
+                                </View>
+                            )}
 
                             {/* Перемикач вкладок */}
                             <View style={styles.tabsWrapper}>
@@ -160,6 +171,14 @@ export default function HomeScreen() {
                                     );
                                 })}
                             </View>
+
+                            {/* Блок завантаження */}
+                            {loading && (
+                                <View style={styles.loaderContainer}>
+                                    <ActivityIndicator size="large" color={COLORS.accent} />
+                                    <Text style={styles.loaderText}>Loading your plans...</Text>
+                                </View>
+                            )}
                         </View>
                     }
                     renderItem={({item}) => (
@@ -182,7 +201,7 @@ export default function HomeScreen() {
                     )}
                 />
 
-                {/* Кнопка створення події */}
+                {/* FAB */}
                 <TouchableOpacity
                     activeOpacity={0.8}
                     style={[styles.fab, {bottom: tabBarHeight + 15}]}
@@ -294,18 +313,24 @@ const styles = StyleSheet.create({
         borderWidth: 2,
         borderColor: COLORS.white
     },
+    loaderContainer: {marginTop: 40, alignItems: "center", justifyContent: "center"},
+    loaderText: {marginTop: 12, color: COLORS.secondary, fontSize: 14, fontWeight: "600"},
     cardPadding: {marginBottom: 8},
     emptyState: {alignItems: "center", marginTop: 60},
     emptyStateText: {color: COLORS.secondary, fontSize: 16, fontWeight: "600", marginTop: 12},
     fab: {
         position: "absolute",
         alignSelf: "center",
-        backgroundColor: "#16A34A",
+        backgroundColor: COLORS.success,
         width: 64,
         height: 64,
-        borderRadius: 22,
+        borderRadius: 32,
         justifyContent: "center",
         alignItems: "center",
-        elevation: 8
+        elevation: 8,
+        shadowColor: "#000",
+        shadowOpacity: 0.2,
+        shadowRadius: 10,
+        shadowOffset: { width: 0, height: 4 }
     },
 });

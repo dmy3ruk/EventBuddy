@@ -1,13 +1,12 @@
 // Категорії для створення події (з емодзі)
 export const EVENT_CATEGORIES = [
-  "🎉 Party",
-  "🎬 Movie",
-  "☕ Coffee",
-  "🎮 Games",
+  "🎉 Social",
   "🏃 Sport",
-  "🎵 Music",
-  "📚 Study",
-  "🍽 Food",
+  "🎵 Culture & Entertaiment",
+  "🍽 Food & Drinks",
+  "💻 Work & Study",
+  "🩺 Health/Self-care",
+  "✨ Other"
 ];
 
 // Категорії для публічних івентів (з фільтром "All")

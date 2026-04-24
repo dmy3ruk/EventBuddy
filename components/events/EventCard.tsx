@@ -1,15 +1,17 @@
 import React, { useEffect, useState } from "react";
 import {
   View, Text, TouchableOpacity, StyleSheet, Platform,
-  Linking, Alert
+  Linking, Alert, Animated
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { doc, getDoc, deleteDoc } from "firebase/firestore";
 import { db } from "../../FirebaseConfig";
-import { EventFull } from "../../utils/types"; // Використовуємо повний тип з ID
+import { EventFull } from "../../utils/types";
+// Імпортуємо Swipeable
+import { Swipeable } from "react-native-gesture-handler";
 
 type Props = {
-  item: EventFull; // Тепер ми впевнені, що id існує
+  item: EventFull;
   uid: string;
   onOpenChat?: (event: EventFull) => void;
   onAccept?: (eventId: string) => void;
@@ -19,7 +21,7 @@ type Props = {
   mode?: 'my-events' | 'discover';
 };
 
-// --- Допоміжні функції ---
+// --- Допоміжні функції (Тепер вони тут, помилки не буде) ---
 const openMap = (lat: number, lng: number, label: string) => {
   const scheme = Platform.select({ ios: 'maps:0,0?q=', android: 'geo:0,0?q=' });
   const url = Platform.select({
@@ -31,11 +33,21 @@ const openMap = (lat: number, lng: number, label: string) => {
 
 const getCategoryTheme = (category?: string) => {
   const cat = category?.toLowerCase() || "";
-  if (cat.includes("sport"))  return { primary: "#10B981", bg: "#F0FDF4" };
-  if (cat.includes("music"))  return { primary: "#8B5CF6", bg: "#F5F3FF" };
-  if (cat.includes("food"))   return { primary: "#F59E0B", bg: "#FFFBEB" };
-  if (cat.includes("study"))  return { primary: "#3B82F6", bg: "#EFF6FF" };
-  if (cat.includes("party"))  return { primary: "#EC4899", bg: "#FDF2F8" };
+  if (cat.includes("work & study"))
+    return { primary: "#334882", bg: "#EFF6FF" };
+  if (cat.includes("social"))
+    return { primary: "#EC4899", bg: "#FDF2F8" };
+  if (cat.includes("entertaiment"))
+    return { primary: "#8B5CF6", bg: "#F5F3FF" };
+  if (cat.includes("health & self-care"))
+    return { primary: "#76cdf3", bg: "#F0FDF4" };
+  if (cat.includes("food & drinks"))
+    return { primary: "#F59E0B", bg: "#FFFBEB" };
+  if (cat.includes("sport"))
+    return { primary: "#10B981", bg: "#F0FDF4" };
+  if (cat.includes("other"))
+    return { primary: "#94A3B8", bg: "#F8FAFC" };
+
   return { primary: "#64748B", bg: "#F8FAFC" };
 };
 
@@ -64,7 +76,9 @@ function ParticipantsRow({ item, usersMap }: { item: EventFull; usersMap: Record
               </View>
           )}
         </View>
-        <Text style={styles.participantsCount}>{uniqueParticipants.length} піде</Text>
+        <Text style={styles.participantsCount}>
+          {uniqueParticipants.length} {uniqueParticipants.length === 1 ? 'going' : 'going'}
+        </Text>
       </View>
   );
 }
@@ -76,7 +90,6 @@ export default function EventCard({ item, uid, onOpenChat, onAccept, onDecline, 
   const theme = getCategoryTheme(item.category);
   const [usersMap, setUsersMap] = useState<Record<string, string>>({});
 
-  // Завантаження імен учасників для аватарок
   useEffect(() => {
     const participants = Array.from(new Set([item.userId, ...(item.acceptedUserIds || [])]));
     const loadUsers = async () => {
@@ -93,30 +106,48 @@ export default function EventCard({ item, uid, onOpenChat, onAccept, onDecline, 
   }, [item.acceptedUserIds, item.userId]);
 
   const handleDelete = () => {
-    Alert.alert("Видалити подію", `Ви впевнені, що хочете видалити "${item.name}"?`, [
-      { text: "Скасувати", style: "cancel" },
+    Alert.alert("Delete Event", `Are you sure you want to delete "${item.name}"?`, [
+      { text: "Cancel", style: "cancel" },
       {
-        text: "Видалити",
+        text: "Delete",
         style: "destructive",
         onPress: async () => {
           try {
-            await deleteDoc(doc(db, "events", item.id)); // Тепер item.id валідний для TS
+            await deleteDoc(doc(db, "events", item.id));
             onDelete?.(item.id);
-          } catch (e) { Alert.alert("Помилка", "Не вдалося видалити"); }
+          } catch (e) { Alert.alert("Error", "Failed to delete event"); }
         },
       },
     ]);
   };
 
+  // Рендер правої дії (видалення)
+  const renderRightActions = (progress: Animated.AnimatedInterpolation<number>, dragX: Animated.AnimatedInterpolation<number>) => {
+    const scale = dragX.interpolate({
+      inputRange: [-80, 0],
+      outputRange: [1, 0],
+      extrapolate: 'clamp',
+    });
+
+    return (
+        <TouchableOpacity onPress={handleDelete} style={styles.deleteSwipeContainer}>
+          <Animated.View style={{ transform: [{ scale }] }}>
+            <Ionicons name="trash-outline" size={28} color="#FFF" />
+            <Text style={styles.deleteSwipeText}>Delete</Text>
+          </Animated.View>
+        </TouchableOpacity>
+    );
+  };
+
   const hasLocation = !!(item.location?.latitude && item.location?.longitude);
 
-  return (
+  const CardContent = (
       <View style={[styles.card, { borderLeftColor: theme.primary }]}>
         <View style={styles.eventHeader}>
           <View style={{ flex: 1 }}>
             <View style={[styles.badge, { backgroundColor: theme.bg }]}>
               <Text style={[styles.badgeText, { color: theme.primary }]}>
-                {item.category ? `#${item.category}` : "#загальне"}
+                {item.category ? `#${item.category.toLowerCase()}` : "#general"}
               </Text>
             </View>
             <Text style={styles.eventName} numberOfLines={1}>{item.name}</Text>
@@ -125,18 +156,18 @@ export default function EventCard({ item, uid, onOpenChat, onAccept, onDecline, 
           <View style={[styles.typeBadge, item.isPublic ? styles.publicBadge : styles.privateBadge]}>
             <Ionicons
                 name={item.isPublic ? "globe-outline" : "lock-closed-outline"}
-                size={10}
+                size={12}
                 color={item.isPublic ? "#059669" : "#6366F1"}
             />
             <Text style={[styles.typeText, { color: item.isPublic ? "#059669" : "#6366F1" }]}>
-              {item.isPublic ? "Публічна" : "Приватна"}
+              {item.isPublic ? "Public" : "Private"}
             </Text>
           </View>
         </View>
 
         <View style={styles.infoSection}>
           <View style={styles.infoRow}>
-            <Ionicons name="calendar-outline" size={14} color="#64748B" />
+            <Ionicons name="calendar-outline" size={24} color="#6E7D93" />
             <Text style={styles.infoText}>{item.date} • {item.time}</Text>
           </View>
 
@@ -145,35 +176,32 @@ export default function EventCard({ item, uid, onOpenChat, onAccept, onDecline, 
                   onPress={() => openMap(item.location!.latitude, item.location!.longitude, item.name)}
                   style={styles.infoRow}
               >
-                <Ionicons name="location-outline" size={14} color={theme.primary} />
+                <Ionicons name="location-outline" size={24} color={theme.primary} />
                 <Text style={[styles.infoText, { color: theme.primary, fontWeight: '700' }]} numberOfLines={1}>
-                  {/* Використовуємо item.location.name відповідно до твоїх типів */}
-                  {item.location?.name || "Десь"}
+                  {item.location?.name || "Somewhere"}
                 </Text>
               </TouchableOpacity>
           )}
         </View>
 
-        {/* Кнопки запрошення */}
         {mode === 'my-events' && isInvited && (
             <View style={styles.inviteActions}>
               <TouchableOpacity style={styles.declineBtn} onPress={() => onDecline?.(item.id)}>
-                <Text style={styles.declineText}>Відхилити</Text>
+                <Text style={styles.declineText}>Decline</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.acceptBtn, { backgroundColor: theme.primary }]} onPress={() => onAccept?.(item.id)}>
-                <Text style={styles.acceptText}>Прийняти</Text>
+                <Text style={styles.acceptText}>Accept</Text>
               </TouchableOpacity>
             </View>
         )}
 
-        {/* Кнопка приєднання (Discover) */}
         {mode === 'discover' && !isOwner && (
             <TouchableOpacity
                 style={[styles.mainBtn, isAccepted ? styles.btnJoined : { backgroundColor: theme.primary }]}
                 onPress={() => onJoinToggle?.(item.id)}
             >
               <Text style={[styles.mainBtnText, isAccepted && { color: "#64748B" }]}>
-                {isAccepted ? "Ви йдете ✓" : "Приєднатися"}
+                {isAccepted ? "Going ✓" : "Join Event"}
               </Text>
             </TouchableOpacity>
         )}
@@ -188,23 +216,35 @@ export default function EventCard({ item, uid, onOpenChat, onAccept, onDecline, 
                   <Ionicons name="chatbubble-ellipses-outline" size={22} color="#94A3B8" />
                 </TouchableOpacity>
             )}
-            {isOwner && (
-                <TouchableOpacity onPress={handleDelete} style={styles.iconBtn}>
-                  <Ionicons name="trash-outline" size={22} color="#F87171" />
-                </TouchableOpacity>
-            )}
           </View>
         </View>
       </View>
   );
+
+  if (isOwner) {
+    return (
+        <Swipeable
+            renderRightActions={renderRightActions}
+            friction={2}
+            rightThreshold={40}
+            containerStyle={styles.swipeableContainer}
+        >
+          {CardContent}
+        </Swipeable>
+    );
+  }
+
+  return CardContent;
 }
 
 const styles = StyleSheet.create({
+  swipeableContainer: {
+    marginBottom: 16, // Переносимо margin сюди, щоб свайп був чітко по картці
+  },
   card: {
     backgroundColor: "#fff",
     borderRadius: 20,
     padding: 16,
-    marginBottom: 16,
     marginHorizontal: 16,
     borderLeftWidth: 5,
     ...Platform.select({
@@ -212,17 +252,32 @@ const styles = StyleSheet.create({
       android: { elevation: 3 },
     }),
   },
-  eventHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 },
-  eventName: { fontSize: 19, fontWeight: "800", color: "#1E293B", marginTop: 4 },
+  deleteSwipeContainer: {
+    width: 80,
+    backgroundColor: '#EF4444',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 20,
+    marginRight: 16,
+    // Висота має бути такою ж як у картки без margin
+  },
+  deleteSwipeText: {
+    color: '#FFF',
+    fontWeight: '800',
+    fontSize: 10,
+    marginTop: 4,
+  },
+  eventHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 },
+  eventName: { fontSize: 19, fontWeight: "800", color: "#1E293B", marginTop: 8 },
   badge: { alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
   badgeText: { fontSize: 10, fontWeight: "800", textTransform: "uppercase" },
   typeBadge: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, borderWidth: 1 },
   publicBadge: { backgroundColor: "#ECFDF5", borderColor: "#A7F3D0" },
   privateBadge: { backgroundColor: "#EEF2FF", borderColor: "#C7D2FE" },
   typeText: { fontSize: 9, fontWeight: "800", textTransform: "uppercase" },
-  infoSection: { gap: 6, marginBottom: 14 },
+  infoSection: { gap: 6, marginBottom: 16 },
   infoRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  infoText: { fontSize: 13, color: "#475569", fontWeight: "600" },
+  infoText: { fontSize: 14, color: "#6E7D93", fontWeight: "600" },
   divider: { height: 1, backgroundColor: "#F1F5F9", marginBottom: 12 },
   bottomRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   participantRow: { flexDirection: "row", alignItems: "center", gap: 8 },

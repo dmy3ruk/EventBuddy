@@ -1,34 +1,69 @@
-import { Stack } from 'expo-router';
+import 'react-native-gesture-handler';
 import { useEffect, useState } from 'react';
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useRouter } from 'expo-router';
+import { Stack, useRouter, useSegments } from 'expo-router';
+import * as SplashScreen from 'expo-splash-screen';
+import { getAuth, onAuthStateChanged, User } from 'firebase/auth';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { useFonts } from 'expo-font';
+import { View } from 'react-native';
 
-export const unstable_settings = {
-    initialRouteName: '(tabs)',
-};
+SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
-    const [initialRoute, setInitialRoute] = useState<string | null>(null);
     const router = useRouter();
+    const segments = useSegments();
 
+    const [user, setUser] = useState<User | null>(null);
+    const [authReady, setAuthReady] = useState(false);
+
+    const [fontsLoaded] = useFonts({
+        SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
+    });
+
+    // 🔥 AUTH LISTENER (only source of truth)
     useEffect(() => {
-        const checkAuth = async () => {
-            const token = await AsyncStorage.getItem("token");
-            if (token) {
-                setInitialRoute("(tabs)"); // Якщо токен є — переходимо в таби
-            } else {
-                setInitialRoute("SignIn"); // Інакше — на SignIn
-            }
-        };
-        checkAuth();
+        const auth = getAuth();
+
+        const unsub = onAuthStateChanged(auth, (u) => {
+            setUser(u);
+            setAuthReady(true);
+        });
+
+        return unsub;
     }, []);
 
-    if (!initialRoute) return null; // Чекаємо поки перевіриться токен
+    useEffect(() => {
+        if (!authReady) return;
+
+        const firstSegment = segments?.[0];
+
+        const inAuth = segments?.[0] === "SignIn" || segments?.[0] === "SignUp";
+        const inTabsGroup = firstSegment === "(tabs)";
+
+        if (!user && inTabsGroup) {
+            router.replace("/SignIn");
+        }
+
+        if (user && inAuth) {
+            router.replace("/HomeScreen");
+        }
+    }, [user, authReady, segments]);
+
+    // 🔥 Splash control
+    useEffect(() => {
+        if (authReady && fontsLoaded) {
+            SplashScreen.hideAsync();
+        }
+    }, [authReady, fontsLoaded]);
+
+    // 🔥 BLOCK UI until ready (IMPORTANT)
+    if (!authReady || !fontsLoaded) {
+        return <View style={{ flex: 1, backgroundColor: "#fff" }} />;
+    }
 
     return (
-        <Stack initialRouteName={initialRoute}>
-            <Stack.Screen name="SignIn" options={{ headerShown: false }} />
-            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        </Stack>
+        <GestureHandlerRootView style={{ flex: 1 }}>
+            <Stack screenOptions={{ headerShown: false }} />
+        </GestureHandlerRootView>
     );
 }

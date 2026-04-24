@@ -163,14 +163,14 @@ export default function ProfileScreen() {
                         sub="Visibility and data control"
                         showChevron
                     />
-                    <SettingsItem
-                        icon="account-check-outline"
-                        title="Verification"
-                        sub="Member since March 2023"
-                        action={
-                            <View style={styles.badge}><Text style={styles.badgeText}>Active</Text></View>
-                        }
-                    />
+                    {/*<SettingsItem*/}
+                    {/*    icon="account-check-outline"*/}
+                    {/*    title="Verification"*/}
+                    {/*    sub="Member since March 2023"*/}
+                    {/*    action={*/}
+                    {/*        <View style={styles.badge}><Text style={styles.badgeText}>Active</Text></View>*/}
+                    {/*    }*/}
+                    {/*/>*/}
                 </View>
 
                 <Text style={styles.footerText}>EventBuddy v1.0.4</Text>

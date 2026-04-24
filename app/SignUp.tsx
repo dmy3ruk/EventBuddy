@@ -58,7 +58,7 @@ const SignUp = () => {
             <View style={styles.signIn}>
                 <View style={styles.welcomeView}>
                     <Text style={styles.headline}>Welcome</Text>
-                    <Text style={{color: "#6E7D93", textAlign:'center'}}>Sign in to continue planning your next great moment</Text>
+                    <Text style={{color: "#6E7D93", textAlign:'center'}}>Sign up to start planning your great moments</Text>
                 </View>
                 <View style={{gap:20}}>
                     <View>
@@ -86,7 +86,7 @@ const SignUp = () => {
 
                 </View>
                 <TouchableOpacity style={styles.signInButton} onPress={signUp}>
-                    <Text>Login</Text>
+                    <Text style={{color: 'white'}}>Sign Up</Text>
                 </TouchableOpacity>
 
                 <Text style={{color: '#6E7D93'}}>
@@ -171,10 +171,10 @@ const styles = StyleSheet.create({
     signIn: {
         backgroundColor:"white",
         gap: 24,
+        marginTop:100,
         flexDirection: 'column',
         alignItems: 'center',
         padding: 0,
-        // gap не завжди підтримується, можна робити marginBottom на дочірніх елементах
     },
     welcomeView: {
         backgroundColor:"white",

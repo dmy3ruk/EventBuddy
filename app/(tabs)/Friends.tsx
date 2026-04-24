@@ -55,16 +55,25 @@ export default function FriendsScreen() {
 
     const auth = getAuth();
 
-    // Отримуємо username поточного користувача при завантаженні
+    // Початкове завантаження даних
     useEffect(() => {
-        const fetchMyUsername = async () => {
+        const initializeData = async () => {
             const user = auth.currentUser;
             if (!user) return;
+
+            // 1. Отримуємо username
             const docRef = doc(db, "usernames", user.uid);
             const docSnap = await getDoc(docRef);
             if (docSnap.exists()) setMyUsername(docSnap.data().username);
+
+            // 2. Отримуємо вхідні запити відразу (для відображення червоного індикатора)
+            fetchIncomingRequests();
+            fetchSentRequests();
+
+            // 3. Якщо перша вкладка "My friends", завантажуємо їх
+            if (activeTab === "My friends") fetchMyFriends();
         };
-        fetchMyUsername();
+        initializeData();
     }, []);
 
     // Оновлюємо дані при зміні вкладок
@@ -74,7 +83,6 @@ export default function FriendsScreen() {
         fetchSentRequests();
     }, [activeTab]);
 
-    // Завантаження списку друзів
     const fetchMyFriends = async () => {
         const user = auth.currentUser;
         if (!user) return;
@@ -87,12 +95,11 @@ export default function FriendsScreen() {
         }
     };
 
-    // Отримання вхідних запитів у друзі
     const fetchIncomingRequests = async () => {
         const user = auth.currentUser;
         if (!user) return;
         try {
-            setLoading(true);
+            // setLoading(true); // Не ставимо loading тут, щоб не заважати фоновому оновленню індикатора
             const q = query(collection(db, "friendRequests"), where("toUid", "==", user.uid));
             const snapshot = await getDocs(q);
             setIncomingRequests(snapshot.docs.map(d => ({id: d.id, ...d.data()} as FriendRequest)));
@@ -101,7 +108,6 @@ export default function FriendsScreen() {
         }
     };
 
-    // Отримання списку ID користувачів, яким ми вже відправили запит
     const fetchSentRequests = async () => {
         const user = auth.currentUser;
         if (!user) return;
@@ -110,9 +116,10 @@ export default function FriendsScreen() {
         setSentRequests(snapshot.docs.map(d => d.data().toUid));
     };
 
-    // Пошук користувачів за нікнеймом
     const handleSearchChange = async (text: string) => {
         setSearch(text);
+        if (text.length > 0 && activeTab !== "Search") setActiveTab("Search");
+
         const trimmed = text.trim().toLowerCase();
         if (!trimmed) {
             setSearchResults([]);
@@ -120,7 +127,6 @@ export default function FriendsScreen() {
         }
         try {
             setLoading(true);
-            // Використовуємо range query для пошуку за початком рядка
             const q = query(collection(db, "usernames"),
                 where("usernameLower", ">=", trimmed),
                 where("usernameLower", "<=", trimmed + "\uf8ff")
@@ -129,14 +135,13 @@ export default function FriendsScreen() {
             const currentUser = auth.currentUser;
             setSearchResults(snapshot.docs
                 .map(d => ({uid: d.id, username: d.data().username}))
-                .filter(u => u.uid !== currentUser?.uid) // Не показуємо себе в пошуку
+                .filter(u => u.uid !== currentUser?.uid)
             );
         } finally {
             setLoading(false);
         }
     };
 
-    // Відправка запиту у друзі
     const handleAddFriend = async (userToAdd: UserItem) => {
         const user = auth.currentUser;
         if (!user || !myUsername) return;
@@ -156,25 +161,17 @@ export default function FriendsScreen() {
         }
     };
 
-    // Прийняття запиту
     const handleAcceptRequest = async (req: FriendRequest) => {
         const user = auth.currentUser;
         if (!user || !myUsername) return;
         try {
             setLoading(true);
-            // Додаємо друга до мого списку
             await setDoc(doc(db, "friends", user.uid, "list", req.fromUid), {
-                uid: req.fromUid,
-                username: req.fromUsername,
-                createdAt: serverTimestamp()
+                uid: req.fromUid, username: req.fromUsername, createdAt: serverTimestamp()
             });
-            // Додаємо мене до списку друга
             await setDoc(doc(db, "friends", req.fromUid, "list", user.uid), {
-                uid: user.uid,
-                username: myUsername,
-                createdAt: serverTimestamp()
+                uid: user.uid, username: myUsername, createdAt: serverTimestamp()
             });
-            // Видаляємо запит
             await deleteDoc(doc(db, "friendRequests", req.id));
             setIncomingRequests(prev => prev.filter(r => r.id !== req.id));
             fetchMyFriends();
@@ -183,7 +180,6 @@ export default function FriendsScreen() {
         }
     };
 
-    // Видалення друга
     const handleRemoveFriend = (friend: FriendItem) => {
         Alert.alert("Remove Friend", `Are you sure?`, [
             {text: "Cancel", style: "cancel"},
@@ -191,7 +187,6 @@ export default function FriendsScreen() {
                 text: "Remove", style: "destructive", onPress: async () => {
                     const user = auth.currentUser;
                     if (!user) return;
-                    // Видаляємо з обох сторін
                     await deleteDoc(doc(db, "friends", user.uid, "list", friend.uid));
                     await deleteDoc(doc(db, "friends", friend.uid, "list", user.uid));
                     setMyFriends(prev => prev.filter(f => f.uid !== friend.uid));
@@ -200,14 +195,11 @@ export default function FriendsScreen() {
         ]);
     };
 
-    // Генерація лінку-запрошення (просто копіює в буфер обміну)
     const handleInvitePress = async () => {
         const user = auth.currentUser;
         if (!user) return;
         const inviteRef = await addDoc(collection(db, "friendInviteLinks"), {
-            ownerUid: user.uid,
-            ownerUsername: myUsername,
-            createdAt: serverTimestamp()
+            ownerUid: user.uid, ownerUsername: myUsername, createdAt: serverTimestamp()
         });
         const link = `https://eventbuddy.app/invite/${inviteRef.id}`;
         await Clipboard.setStringAsync(link);
@@ -216,7 +208,7 @@ export default function FriendsScreen() {
 
     return (
         <SafeAreaView style={[styles.container, {backgroundColor: COLORS.surface}]} edges={['top']}>
-            {/* Секція заголовка */}
+            {/* Header */}
             <View style={styles.header}>
                 <View>
                     <Text style={styles.welcomeText}>MANAGE YOUR</Text>
@@ -228,7 +220,7 @@ export default function FriendsScreen() {
                 </TouchableOpacity>
             </View>
 
-            {/* Рядок пошуку */}
+            {/* Search Bar */}
             <View style={styles.searchSection}>
                 <View style={styles.searchBar}>
                     <MaterialCommunityIcons name="magnify" size={22} color={COLORS.primary}/>
@@ -237,15 +229,18 @@ export default function FriendsScreen() {
                         style={styles.searchInput}
                         value={search}
                         onChangeText={handleSearchChange}
+                        onFocus={() => setActiveTab("Search")}
                         placeholderTextColor={COLORS.secondary}
                     />
                 </View>
             </View>
 
-            {/* Навігація вкладками */}
+            {/* Tabs with Badge */}
             <View style={styles.tabBar}>
                 {(["Requests", "My friends"] as TabType[]).map((tab) => {
                     const isActive = activeTab === tab;
+                    const hasRequests = tab === "Requests" && incomingRequests.length > 0;
+
                     return (
                         <TouchableOpacity
                             key={tab}
@@ -253,31 +248,30 @@ export default function FriendsScreen() {
                                 setActiveTab(tab);
                                 Haptics.selectionAsync();
                             }}
-                            style={[styles.tabItem, isActive && {backgroundColor: COLORS.primaryContainer}]}
+                            style={[styles.tabItem, isActive && styles.activeTabItem]}
                         >
-                            <Text style={[styles.tabLabel, {color: isActive ? COLORS.primary : COLORS.secondary}]}>
-                                {tab === "My friends" ? "List" : tab}
-                            </Text>
+                            <View style={styles.tabContent}>
+                                <Text style={[styles.tabLabel, {color: isActive ? COLORS.primary : COLORS.secondary}]}>
+                                    {tab === "My friends" ? "List" : tab}
+                                </Text>
+                                {hasRequests && <View style={styles.requestBadge} />}
+                            </View>
                         </TouchableOpacity>
                     );
                 })}
             </View>
 
-            <ScrollView
-                contentContainerStyle={styles.listContainer}
-                showsVerticalScrollIndicator={false}
-            >
+            <ScrollView contentContainerStyle={styles.listContainer} showsVerticalScrollIndicator={false}>
                 {loading && <ActivityIndicator color={COLORS.primary} style={{marginBottom: 15}}/>}
 
-                {/* Відображення результатів пошуку */}
+                {/* Search Results */}
                 {activeTab === "Search" && searchResults.map(user => {
                     const isFriend = myFriends.some(f => f.uid === user.uid);
                     const isSent = sentRequests.includes(user.uid);
                     return (
                         <View key={user.uid} style={styles.card}>
                             <View style={[styles.avatar, {backgroundColor: COLORS.primaryContainer}]}>
-                                <Text
-                                    style={[styles.avatarText, {color: COLORS.primary}]}>{user.username[0].toUpperCase()}</Text>
+                                <Text style={[styles.avatarText, {color: COLORS.primary}]}>{user.username[0].toUpperCase()}</Text>
                             </View>
                             <View style={styles.cardInfo}>
                                 <Text style={styles.cardName}>{user.username}</Text>
@@ -286,20 +280,15 @@ export default function FriendsScreen() {
                             <TouchableOpacity
                                 disabled={isFriend || isSent}
                                 onPress={() => handleAddFriend(user)}
-                                style={[styles.actionBtn, (isFriend || isSent) && {
-                                    backgroundColor: COLORS.secondary,
-                                    opacity: 0.6
-                                }]}
+                                style={[styles.actionBtn, (isFriend || isSent) && {backgroundColor: COLORS.secondary, opacity: 0.6}]}
                             >
-                                <Text style={styles.actionBtnText}>
-                                    {isFriend ? "Friend" : isSent ? "Sent" : "Add"}
-                                </Text>
+                                <Text style={styles.actionBtnText}>{isFriend ? "Friend" : isSent ? "Sent" : "Add"}</Text>
                             </TouchableOpacity>
                         </View>
                     );
                 })}
 
-                {/* Відображення вхідних запитів */}
+                {/* Incoming Requests */}
                 {activeTab === "Requests" && incomingRequests.map(req => (
                     <View key={req.id} style={styles.card}>
                         <View style={styles.avatar}>
@@ -309,14 +298,13 @@ export default function FriendsScreen() {
                             <Text style={styles.cardName}>{req.fromUsername}</Text>
                             <Text style={styles.cardSub}>Wants to be friends</Text>
                         </View>
-                        <TouchableOpacity onPress={() => handleAcceptRequest(req)}
-                                          style={[styles.actionBtn, {backgroundColor: COLORS.success}]}>
+                        <TouchableOpacity onPress={() => handleAcceptRequest(req)} style={[styles.actionBtn, {backgroundColor: COLORS.success}]}>
                             <Text style={styles.actionBtnText}>Accept</Text>
                         </TouchableOpacity>
                     </View>
                 ))}
 
-                {/* Відображення списку друзів */}
+                {/* Friends List */}
                 {activeTab === "My friends" && myFriends.map(friend => (
                     <View key={friend.uid} style={styles.card}>
                         <View style={[styles.avatar, {backgroundColor: COLORS.secondary}]}>
@@ -338,92 +326,28 @@ export default function FriendsScreen() {
 
 const styles = StyleSheet.create({
     container: {flex: 1},
-    header: {
-        flexDirection: "row",
-        justifyContent: "space-between",
-        alignItems: "center",
-        paddingHorizontal: 20,
-        paddingVertical: 15
-    },
-    welcomeText: {
-        fontSize: 12,
-        fontWeight: "800",
-        color: COLORS.primary,
-        textTransform: "uppercase",
-        letterSpacing: 1.5
-    },
+    header: {flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 20, paddingVertical: 15},
+    welcomeText: {fontSize: 12, fontWeight: "800", color: COLORS.primary, textTransform: "uppercase", letterSpacing: 1.5},
     headerTitle: {fontSize: 32, fontWeight: "800", color: COLORS.onSurface, letterSpacing: -0.5},
-    inviteBadge: {
-        flexDirection: "row",
-        alignItems: "center",
-        backgroundColor: COLORS.primaryContainer,
-        paddingVertical: 8,
-        paddingHorizontal: 14,
-        borderRadius: 20,
-        gap: 6
-    },
+    inviteBadge: {flexDirection: "row", alignItems: "center", backgroundColor: COLORS.primaryContainer, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20, gap: 6},
     inviteText: {fontWeight: "700", color: COLORS.primary, fontSize: 14},
     searchSection: {paddingHorizontal: 20, marginBottom: 15},
-    searchBar: {
-        flexDirection: "row",
-        alignItems: "center",
-        backgroundColor: COLORS.white,
-        borderRadius: 20,
-        paddingHorizontal: 15,
-        height: 56,
-        elevation: 4,
-        shadowColor: COLORS.primary,
-        shadowOpacity: 0.1,
-        shadowRadius: 10,
-        shadowOffset: {width: 0, height: 4}
-    },
+    searchBar: {flexDirection: "row", alignItems: "center", backgroundColor: COLORS.white, borderRadius: 20, paddingHorizontal: 15, height: 56, elevation: 4, shadowColor: COLORS.primary, shadowOpacity: 0.1, shadowRadius: 10, shadowOffset: {width: 0, height: 4}},
     searchInput: {flex: 1, marginLeft: 10, fontSize: 16, color: COLORS.onSurface},
     tabBar: {flexDirection: "row", paddingHorizontal: 20, gap: 10, marginBottom: 20},
-    tabItem: {
-        paddingVertical: 10,
-        paddingHorizontal: 20,
-        borderRadius: 25,
-        backgroundColor: "#ffff",
-        borderWidth: 1,
-        borderColor: COLORS.primaryContainer
-    },
+    tabItem: {paddingVertical: 10, paddingHorizontal: 20, borderRadius: 25, backgroundColor: "#fff", borderWidth: 1, borderColor: COLORS.primaryContainer},
+    activeTabItem: {backgroundColor: COLORS.primaryContainer, borderColor: COLORS.primary},
+    tabContent: {flexDirection: 'row', alignItems: 'center'},
     tabLabel: {fontWeight: "700", fontSize: 14},
+    requestBadge: {width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.error, marginLeft: 6, borderWidth: 1, borderColor: COLORS.white},
     listContainer: {paddingHorizontal: 20, paddingBottom: 40},
-    card: {
-        flexDirection: "row",
-        alignItems: "center",
-        backgroundColor: COLORS.white,
-        borderRadius: 24,
-        padding: 16,
-        marginBottom: 12,
-        elevation: 2,
-        shadowColor: "#000",
-        shadowOpacity: 0.05,
-        shadowRadius: 8,
-        shadowOffset: {width: 0, height: 2}
-    },
-    avatar: {
-        width: 52,
-        height: 52,
-        borderRadius: 18,
-        alignItems: "center",
-        justifyContent: "center",
-        backgroundColor: COLORS.primary
-    },
+    card: {flexDirection: "row", alignItems: "center", backgroundColor: COLORS.white, borderRadius: 24, padding: 16, marginBottom: 12, elevation: 2, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 8, shadowOffset: {width: 0, height: 2}},
+    avatar: {width: 52, height: 52, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.primary},
     avatarText: {color: COLORS.white, fontSize: 20, fontWeight: "bold"},
     cardInfo: {flex: 1, marginLeft: 15},
     cardName: {fontSize: 17, fontWeight: "700", color: COLORS.onSurface},
     cardSub: {fontSize: 13, color: COLORS.secondary},
-    actionBtn: {
-        backgroundColor: COLORS.primary,
-        paddingVertical: 10,
-        paddingHorizontal: 18,
-        borderRadius: 16
-    },
+    actionBtn: {backgroundColor: COLORS.primary, paddingVertical: 10, paddingHorizontal: 18, borderRadius: 16},
     actionBtnText: {color: COLORS.white, fontWeight: "800", fontSize: 14},
-    deleteIconBtn: {
-        padding: 10,
-        backgroundColor: "rgba(239, 68, 68, 0.08)",
-        borderRadius: 12,
-    }
+    deleteIconBtn: {padding: 10, backgroundColor: "rgba(239, 68, 68, 0.08)", borderRadius: 12}
 });
