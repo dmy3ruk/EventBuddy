@@ -3,6 +3,10 @@
     "name": "eventBuddy",
     "slug": "eventBuddy",
     "version": "1.0.0",
+    "extra": {
+      "cloudinaryCloudName": "process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME",
+      "cloudinaryUploadPreset": "process.env.EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET"
+    },
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "eventbuddy",
