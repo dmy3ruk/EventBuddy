@@ -1,14 +1,14 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
     View,
     Text,
     StyleSheet,
     TouchableOpacity,
     ScrollView,
+    Platform,
     Alert,
     ActivityIndicator,
     Image,
-    Switch,
 } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { getAuth } from "firebase/auth";
@@ -21,8 +21,10 @@ import {
     collection,
     updateDoc,
     getDoc,
+    query,
+    where
 } from "firebase/firestore";
-import * as ImagePicker from "expo-image-picker";
+import * as ImagePicker from 'expo-image-picker';
 
 import {
     subscribeToOwnerEvents,
@@ -30,8 +32,8 @@ import {
     calculateProfileStats,
 } from "../../utils/firestoreService";
 import { EventFull } from "../../utils/types";
-import { useNavigation } from "@react-navigation/native";
-import {getBadges} from "@/utils/badges";
+import {useNavigation} from "@react-navigation/native";
+import {white} from "colorette";
 
 const COLORS = {
     primary: "#505BEB",
@@ -45,6 +47,7 @@ const COLORS = {
 };
 
 export default function ProfileScreen() {
+    // 1. СТАН (States)
     const [currentUid, setCurrentUid] = useState<string | null>(null);
     const [email, setEmail] = useState<string | null>(null);
     const [username, setUsername] = useState<string>("");
@@ -59,25 +62,6 @@ export default function ProfileScreen() {
 
     const [isAdmin, setIsAdmin] = useState(false);
 
-    const [privateProfile, setPrivateProfile] = useState(false);
-    const [eventNotifications, setEventNotifications] = useState(true);
-
-    const navigation = useNavigation<any>();
-
-    useEffect(() => {
-        const unsubscribeAuth = getAuth().onAuthStateChanged((u) => {
-            if (!u) {
-                router.replace("/SignIn");
-                return;
-            }
-
-            setCurrentUid(u.uid);
-            setEmail(u.email);
-        });
-
-        return () => unsubscribeAuth();
-    }, []);
-
     useEffect(() => {
         if (!currentUid) return;
 
@@ -88,30 +72,37 @@ export default function ProfileScreen() {
         });
     }, [currentUid]);
 
+    const navigation = useNavigation<any>();
+    // 2. ЕФЕКТ: Слухаємо зміну стану авторизації
     useEffect(() => {
-        if (!currentUid) return;
+        const unsubscribeAuth = getAuth().onAuthStateChanged((u) => {
+            if (!u) {
+                router.replace("/SignIn");
+                return;
+            }
+            setCurrentUid(u.uid);
+            setEmail(u.email);
+        });
+        return () => unsubscribeAuth();
+    }, []);
 
-        getDoc(doc(db, "users", currentUid))
-            .then((snap) => {
-                if (snap.exists()) {
-                    const data = snap.data();
+    // 3. ЕФЕКТ: Завантаження даних (тільки коли currentUid вже є)
+    useEffect(() => {
+        if (!currentUid) return; // Чекаємо, поки з'явиться UID
 
-                    setUsername(data.username || "No username");
-                    setAvatarUrl(data.avatarUrl || null);
-                    setPrivateProfile(data.privateProfile || false);
-                    setEventNotifications(data.eventNotifications ?? true);
-                }
-            })
-            .catch((err) => console.error("Profile load error:", err));
+        // Завантаження профілю
+        getDoc(doc(db, "usernames", currentUid)).then((snap) => {
+            if (snap.exists()) {
+                setUsername(snap.data().username || "No username");
+                setAvatarUrl(snap.data().avatarUrl || null);
+            }
+        }).catch(err => console.error("Profile load error:", err));
 
-        const unsubOwner = subscribeToOwnerEvents(currentUid, (evs) =>
-            setOwnerEvents(evs as EventFull[])
-        );
+        // Підписки на події
+        const unsubOwner = subscribeToOwnerEvents(currentUid, (evs) => setOwnerEvents(evs as EventFull[]));
+        const unsubInvited = subscribeToInvitedEvents(currentUid, (evs) => setInvitedEvents(evs as EventFull[]));
 
-        const unsubInvited = subscribeToInvitedEvents(currentUid, (evs) =>
-            setInvitedEvents(evs as EventFull[])
-        );
-
+        // Підписка на друзів (нова логіка через userA/userB)
         const friendsListRef = collection(db, "friends", currentUid, "list");
 
         const unsubFriends = onSnapshot(
@@ -129,68 +120,20 @@ export default function ProfileScreen() {
         };
     }, [currentUid]);
 
+    // 4. ЕФЕКТ: Розрахунок статистики
     useEffect(() => {
         if (!currentUid) return;
-
         const stats = calculateProfileStats(ownerEvents, invitedEvents, currentUid);
-
         setUpcomingCount(stats.upcomingCount);
         setTotalAttendees(stats.totalAttendees);
     }, [ownerEvents, invitedEvents, currentUid]);
 
-    const allEvents = useMemo(() => {
-        return [...ownerEvents, ...invitedEvents];
-    }, [ownerEvents, invitedEvents]);
-
-    const nextEvent = useMemo(() => {
-        const now = new Date();
-
-        return allEvents
-            .filter((event) => {
-                if (!event.date) return false;
-                const eventDate = new Date(event.date);
-                return eventDate >= now;
-            })
-            .sort(
-                (a, b) =>
-                    new Date(a.date).getTime() - new Date(b.date).getTime()
-            )[0];
-    }, [allEvents]);
-
-    const badges = getBadges({
-        ownerEventsCount: ownerEvents.length,
-        friendsCount: friendsConected,
-        totalAttendees,
-    });
-
-    const updateSetting = async (
-        key: "privateProfile" | "eventNotifications",
-        value: boolean
-    ) => {
-        if (!currentUid) return;
-
-        if (key === "privateProfile") {
-            setPrivateProfile(value);
-        }
-
-        if (key === "eventNotifications") {
-            setEventNotifications(value);
-        }
-
-        try {
-            await updateDoc(doc(db, "users", currentUid), {
-                [key]: value,
-            });
-        } catch (error) {
-            Alert.alert("Помилка", "Не вдалося оновити налаштування");
-        }
-    };
+    // --- ФУНКЦІЇ ---
 
     const pickImage = async () => {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-
-        if (status !== "granted") {
-            Alert.alert("Error", "Permissions needed.");
+        if (status !== 'granted') {
+            Alert.alert('Error', 'Permissions needed.');
             return;
         }
 
@@ -208,23 +151,9 @@ export default function ProfileScreen() {
 
     const handleUpload = async (uri: string) => {
         if (!currentUid) return;
-
         setUploading(true);
-
-        try {
-            const cloudinaryUrl = uri;
-
-            await updateDoc(doc(db, "users", currentUid), {
-                avatarUrl: cloudinaryUrl,
-            });
-
-            setAvatarUrl(cloudinaryUrl);
-        } catch (error) {
-            console.error("Upload error:", error);
-            Alert.alert("Error", "Failed to upload avatar");
-        } finally {
-            setUploading(false);
-        }
+        // ... ваша логіка Cloudinary ...
+        setUploading(false);
     };
 
     const handleLogout = async () => {
@@ -237,156 +166,44 @@ export default function ProfileScreen() {
     };
 
     return (
-        <SafeAreaView style={styles.container} edges={["top"]}>
-            <ScrollView
-                showsVerticalScrollIndicator={false}
-                contentContainerStyle={styles.scrollContent}
-            >
+        <SafeAreaView style={styles.container} edges={['top']}>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
                 <View style={styles.topActions}>
                     <Text style={styles.topTitle}>Profile</Text>
-
                     <TouchableOpacity onPress={handleLogout} style={styles.logoutBtn}>
-                        <MaterialCommunityIcons
-                            name="logout-variant"
-                            size={22}
-                            color={COLORS.error}
-                        />
+                        <MaterialCommunityIcons name="logout-variant" size={22} color={COLORS.error} />
                     </TouchableOpacity>
                 </View>
 
-                <View style={styles.profileCard}>
-                    <View style={styles.avatarWrapper}>
-                        <View style={styles.avatar}>
-                            {uploading ? (
-                                <ActivityIndicator color={COLORS.white} />
-                            ) : avatarUrl ? (
-                                <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
-                            ) : (
-                                <Text style={styles.avatarText}>
-                                    {username ? username[0]?.toUpperCase() : "A"}
-                                </Text>
-                            )}
-                        </View>
-
-                        <TouchableOpacity style={styles.editIcon} onPress={pickImage}>
-                            <Ionicons name="pencil" size={16} color="#fff" />
-                        </TouchableOpacity>
+                <View style={styles.avatarWrapper}>
+                    <View style={styles.avatar}>
+                        {uploading ? (
+                            <ActivityIndicator color={COLORS.white} />
+                        ) : avatarUrl ? (
+                            <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
+                        ) : (
+                            <Text style={styles.avatarText}>
+                                {username ? username[0]?.toUpperCase() : "A"}
+                            </Text>
+                        )}
                     </View>
 
-                    <Text style={styles.nameText}>{username}</Text>
-
-                    <Text style={styles.emailText}>{email}</Text>
-
-                    <View style={styles.bioBox}>
-                        <Text style={styles.bioText}>
-                            ✨ Event lover • planning memories with friends
-                        </Text>
-                    </View>
+                    {/* ✏️ кнопка редагування */}
+                    <TouchableOpacity style={styles.editIcon} onPress={pickImage}>
+                        <Ionicons name="pencil" size={16} color="#fff" />
+                    </TouchableOpacity>
                 </View>
 
                 <View style={styles.statsContainer}>
                     <View style={styles.statsRow}>
-                        <StatCard
-                            label="Events"
-                            value={ownerEvents.length}
-                            icon="calendar-star"
-                            color={COLORS.primary}
-                        />
-                        <StatCard
-                            label="Attended"
-                            value={totalAttendees}
-                            icon="check-decagram"
-                            color="#16A34A"
-                        />
+                        <StatCard label="Events" value={ownerEvents.length} icon="calendar-star" color={COLORS.primary} />
+                        <StatCard label="Attended" value={totalAttendees} icon="check-decagram" color="#16A34A" />
                     </View>
-
                     <View style={styles.statsRow}>
-                        <StatCard
-                            label="Friends"
-                            value={friendsConected}
-                            icon="account-group"
-                            color="#0EA5E9"
-                        />
-                        <StatCard
-                            label="Upcoming"
-                            value={upcomingCount}
-                            icon="clock-fast"
-                            color="#F59E0B"
-                        />
+                        <StatCard label="Friends" value={friendsConected} icon="account-group" color="#0EA5E9" />
+                        <StatCard label="Upcoming" value={upcomingCount} icon="clock-fast" color="#F59E0B" />
                     </View>
                 </View>
-
-                {badges.length > 0 && (
-                    <>
-                        <SectionTitle title="Badges" />
-
-                        <View style={styles.badgesRow}>
-                            {badges.map((badge) => (
-                                <View key={badge.title} style={styles.badgeCard}>
-                                    <View
-                                        style={[
-                                            styles.badgeIcon,
-                                            { backgroundColor: badge.color + "18" },
-                                        ]}
-                                    >
-                                        <MaterialCommunityIcons
-                                            name={badge.icon as any}
-                                            size={22}
-                                            color={badge.color}
-                                        />
-                                    </View>
-
-                                    <Text style={styles.badgeText}>
-                                        {badge.title}
-                                    </Text>
-                                </View>
-                            ))}
-                        </View>
-                    </>
-                )}
-
-
-                <SectionTitle title="Settings" />
-
-                <View style={styles.settingsCard}>
-                    <SettingRow
-                        icon="lock-outline"
-                        title="Private profile"
-                        subtitle="Hide your profile from public users"
-                        value={privateProfile}
-                        onValueChange={(value) => updateSetting("privateProfile", value)}
-                    />
-
-                    <View style={styles.divider} />
-
-                    <SettingRow
-                        icon="bell-outline"
-                        title="Event notifications"
-                        subtitle="Get reminders about upcoming events"
-                        value={eventNotifications}
-                        onValueChange={(value) =>
-                            updateSetting("eventNotifications", value)
-                        }
-                    />
-
-                    <View style={styles.divider} />
-
-                    <TouchableOpacity style={styles.settingsLink}>
-                        <View style={styles.settingIconBox}>
-                            <Ionicons name="person-outline" size={20} color={COLORS.primary} />
-                        </View>
-
-                        <View style={{ flex: 1 }}>
-                            <Text style={styles.settingTitle}>Edit profile</Text>
-                            <Text style={styles.settingSubtitle}>
-                                Change bio, username or avatar
-                            </Text>
-                        </View>
-
-                        <Ionicons name="chevron-forward" size={20} color={COLORS.outline} />
-                    </TouchableOpacity>
-                </View>
-
                 {isAdmin && (
                     <TouchableOpacity
                         style={styles.button}
@@ -400,304 +217,68 @@ export default function ProfileScreen() {
     );
 }
 
-const SectionTitle = ({ title }: { title: string }) => (
-    <Text style={styles.sectionTitle}>{title}</Text>
-);
-
 const StatCard = ({ label, value, icon, color }: any) => (
     <View style={styles.statCard}>
-        <View style={[styles.iconCircle, { backgroundColor: color + "15" }]}>
+        <View style={[styles.iconCircle, { backgroundColor: color + '15' }]}>
             <MaterialCommunityIcons name={icon} size={24} color={color} />
         </View>
-
         <Text style={styles.statValue}>{value}</Text>
         <Text style={styles.statLabel}>{label}</Text>
     </View>
 );
 
-const SettingRow = ({
-                        icon,
-                        title,
-                        subtitle,
-                        value,
-                        onValueChange,
-                    }: {
-    icon: any;
-    title: string;
-    subtitle: string;
-    value: boolean;
-    onValueChange: (value: boolean) => void;
-}) => (
-    <View style={styles.settingRow}>
-        <View style={styles.settingIconBox}>
-            <Ionicons name={icon} size={20} color={COLORS.primary} />
-        </View>
-
-        <View style={{ flex: 1 }}>
-            <Text style={styles.settingTitle}>{title}</Text>
-            <Text style={styles.settingSubtitle}>{subtitle}</Text>
-        </View>
-
-        <Switch
-            value={value}
-            onValueChange={onValueChange}
-            trackColor={{ false: "#CBD5E1", true: "#C7D2FE" }}
-            thumbColor={value ? COLORS.primary : "#F8FAFC"}
-        />
-    </View>
-);
-
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: COLORS.surface,
-    },
-    scrollContent: {
-        paddingBottom: 40,
-        paddingHorizontal: 20,
-    },
-    topActions: {
-        flexDirection: "row",
-        justifyContent: "space-between",
-        alignItems: "center",
-        marginTop: 20,
-        marginBottom: 20,
-    },
-    topTitle: {
-        fontSize: 28,
-        fontWeight: "900",
-        color: COLORS.onSurface,
-    },
-    logoutBtn: {
-        padding: 10,
-        backgroundColor: COLORS.white,
-        borderRadius: 14,
-        elevation: 2,
-    },
-    profileCard: {
-        backgroundColor: COLORS.white,
-        borderRadius: 28,
-        paddingVertical: 24,
-        paddingHorizontal: 18,
-        alignItems: "center",
-        marginBottom: 18,
-        elevation: 3,
-        shadowColor: "#000",
-        shadowOpacity: 0.05,
-        shadowRadius: 8,
-    },
+    container: { flex: 1, backgroundColor: COLORS.surface },
+    scrollContent: { paddingBottom: 40, paddingHorizontal: 20 },
+    topActions: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 20, marginBottom: 30 },
+    topTitle: { fontSize: 28, fontWeight: "900", color: COLORS.onSurface },
+    logoutBtn: { padding: 10, backgroundColor: COLORS.white, borderRadius: 14, elevation: 2 },
+    profileHeader: { alignItems: "center", marginBottom: 30 },
     avatarWrapper: {
         position: "relative",
         marginBottom: 16,
-        width: 104,
-        height: 104,
+        width: 100,
+        height: 100,
         alignSelf: "center",
     },
-    avatar: {
-        width: 104,
-        height: 104,
-        borderRadius: 52,
-        backgroundColor: COLORS.primary,
-        justifyContent: "center",
-        alignItems: "center",
+    avatar: { width: 100, height: 100, borderRadius: 35, backgroundColor: COLORS.primary, justifyContent: "center", alignItems: "center" },
+    avatarImage: { width: "100%", height: "100%", borderRadius: 35 },
+    avatarText: { fontSize: 40, fontWeight: "bold", color: COLORS.white },
+    nameText: { fontSize: 24, fontWeight: "800", color: COLORS.onSurface },
+    emailText: { fontSize: 14, color: COLORS.outline, marginTop: 4 },
+    statsContainer: { gap: 12 },
+    statsRow: { flexDirection: "row", gap: 12 },
+    statCard: { flex: 1, backgroundColor: COLORS.white, padding: 16, borderRadius: 24, alignItems: "center", elevation: 3 },
+    iconCircle: { padding: 10, borderRadius: 16, marginBottom: 8 },
+    statValue: { fontSize: 22, fontWeight: "900" },
+    statLabel: { fontSize: 12, color: COLORS.outline },
+    button: {
+        backgroundColor: '#007bff',
+        paddingVertical: 12,
+        paddingHorizontal: 20,
+        borderRadius: 8,
+        alignItems: 'center',
+        marginTop: 10,
     },
-    avatarImage: {
-        width: "100%",
-        height: "100%",
-        borderRadius: 52,
-    },
-    avatarText: {
-        fontSize: 40,
-        fontWeight: "bold",
-        color: COLORS.white,
+    text: {
+        color: '#fff',
+        fontSize: 16,
+        fontWeight: '600',
     },
     editIcon: {
         position: "absolute",
         bottom: -2,
         right: -4,
-        backgroundColor: COLORS.primary,
-        width: 32,
-        height: 32,
-        borderRadius: 11,
+        backgroundColor: "#505BEB",
+        width: 30,
+        height: 30,
+        borderRadius: 10,
         justifyContent: "center",
         alignItems: "center",
         elevation: 4,
+
+        // 👇 робить вигляд як в Instagram
         borderWidth: 2,
         borderColor: "#fff",
-    },
-    nameText: {
-        fontSize: 22,
-        fontWeight: "800",
-        color: COLORS.onSurface,
-    },
-    emailText: {
-        fontSize: 13,
-        color: COLORS.outline,
-        marginTop: 4,
-    },
-    bioBox: {
-        marginTop: 14,
-        backgroundColor: COLORS.primaryContainer,
-        paddingVertical: 10,
-        paddingHorizontal: 14,
-        borderRadius: 18,
-    },
-    bioText: {
-        fontSize: 13,
-        color: COLORS.primary,
-        fontWeight: "600",
-        textAlign: "center",
-    },
-    statsContainer: {
-        gap: 12,
-    },
-    statsRow: {
-        flexDirection: "row",
-        gap: 12,
-    },
-    statCard: {
-        flex: 1,
-        backgroundColor: COLORS.white,
-        padding: 16,
-        borderRadius: 24,
-        elevation: 3,
-        shadowColor: "#000",
-        shadowOpacity: 0.05,
-        shadowRadius: 8,
-        alignItems: "center",
-    },
-    iconCircle: {
-        padding: 10,
-        borderRadius: 16,
-        marginBottom: 8,
-    },
-    statValue: {
-        fontSize: 22,
-        fontWeight: "900",
-    },
-    statLabel: {
-        fontSize: 12,
-        color: COLORS.outline,
-    },
-    sectionTitle: {
-        fontSize: 18,
-        fontWeight: "800",
-        color: COLORS.onSurface,
-        marginTop: 24,
-        marginBottom: 12,
-    },
-    badgesRow: {
-        flexDirection: "row",
-        gap: 10,
-    },
-    badgeCard: {
-        flex: 1,
-        backgroundColor: COLORS.white,
-        borderRadius: 20,
-        paddingVertical: 14,
-        alignItems: "center",
-        elevation: 2,
-        shadowColor: "#000",
-        shadowOpacity: 0.04,
-        shadowRadius: 6,
-    },
-    badgeIcon: {
-        width: 42,
-        height: 42,
-        borderRadius: 16,
-        justifyContent: "center",
-        alignItems: "center",
-        marginBottom: 8,
-    },
-    badgeText: {
-        fontSize: 12,
-        fontWeight: "700",
-        color: COLORS.onSurface,
-    },
-    nextEventCard: {
-        backgroundColor: COLORS.white,
-        borderRadius: 24,
-        padding: 16,
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 14,
-        elevation: 2,
-        shadowColor: "#000",
-        shadowOpacity: 0.04,
-        shadowRadius: 6,
-    },
-    nextEventIcon: {
-        width: 48,
-        height: 48,
-        borderRadius: 16,
-        backgroundColor: COLORS.primaryContainer,
-        justifyContent: "center",
-        alignItems: "center",
-    },
-    nextEventTitle: {
-        fontSize: 15,
-        fontWeight: "800",
-        color: COLORS.onSurface,
-    },
-    nextEventSubtitle: {
-        fontSize: 12,
-        color: COLORS.outline,
-        marginTop: 4,
-    },
-    settingsCard: {
-        backgroundColor: COLORS.white,
-        borderRadius: 24,
-        padding: 16,
-        elevation: 2,
-        shadowColor: "#000",
-        shadowOpacity: 0.04,
-        shadowRadius: 6,
-        marginBottom:96
-    },
-    settingRow: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 12,
-    },
-    settingsLink: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 12,
-    },
-    settingIconBox: {
-        width: 40,
-        height: 40,
-        borderRadius: 14,
-        backgroundColor: COLORS.primaryContainer,
-        justifyContent: "center",
-        alignItems: "center",
-    },
-    settingTitle: {
-        fontSize: 14,
-        fontWeight: "800",
-        color: COLORS.onSurface,
-    },
-    settingSubtitle: {
-        fontSize: 12,
-        color: COLORS.outline,
-        marginTop: 2,
-    },
-    divider: {
-        height: 1,
-        backgroundColor: "#E2E8F0",
-        marginVertical: 14,
-    },
-    button: {
-        backgroundColor: "#007bff",
-        paddingVertical: 12,
-        paddingHorizontal: 20,
-        borderRadius: 8,
-        alignItems: "center",
-        marginTop: 24,
-    },
-    text: {
-        color: "#fff",
-        fontSize: 16,
-        fontWeight: "600",
     },
 });

@@ -7,24 +7,9 @@ import { db } from "../FirebaseConfig";
 
 export async function fetchUsername() {
     const uid = getAuth().currentUser?.uid;
-    if (!uid) {
-        console.log("❌ No current user");
-        return null;
-    }
-
-    console.log("🔍 Fetching username for uid:", uid);
-
-    // ✅ ВИПРАВЛЕНО: шукаємо в колекції users, а не usernames
-    const snap = await getDoc(doc(db, "users", uid));
-
-    if (snap.exists()) {
-        const username = snap.data().username as string;
-        console.log("✅ Found username:", username);
-        return username;
-    } else {
-        console.log("❌ User document doesn't exist");
-        return null;
-    }
+    if (!uid) return null;
+    const snap = await getDoc(doc(db, "usernames", uid));
+    return snap.exists() ? (snap.data().username as string) : null;
 }
 
 export async function acceptInvite(eventId: string) {
@@ -44,20 +29,12 @@ export async function declineInvite(eventId: string) {
 
 // ✅ Тепер uid передається як параметр — не береться всередині
 export function subscribeToOwnerEvents(uid: string, callback: (events: any[]) => void) {
-    const q = query(
-        collection(db, "events"),
-        where("organizerId", "==", uid)
-    );
-
-    return onSnapshot(
-        q,
-        (snapshot) => {
-            callback(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
-        },
-        (error) => {
-            console.log("❌ subscribeToOwnerEvents error:", error.code, "uid:", uid);
-        }
-    );
+    const q = query(collection(db, "events"), where("userId", "==", uid));
+    return onSnapshot(q, (snapshot) => {
+        callback(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
+    }, (error) => {
+        console.log("❌ subscribeToOwnerEvents error:", error.code, "uid:", uid);
+    });
 }
 
 export function subscribeToInvitedEvents(uid: string, callback: (events: any[]) => void) {
