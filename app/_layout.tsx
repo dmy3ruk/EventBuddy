@@ -1,11 +1,11 @@
-import 'react-native-gesture-handler';
-import { useEffect, useState } from 'react';
-import { Stack, useRouter, useSegments } from 'expo-router';
-import * as SplashScreen from 'expo-splash-screen';
-import { getAuth, onAuthStateChanged, User } from 'firebase/auth';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { useFonts } from 'expo-font';
-import { View } from 'react-native';
+import "react-native-gesture-handler";
+import { useEffect, useState } from "react";
+import { Stack, useRouter, useSegments } from "expo-router";
+import * as SplashScreen from "expo-splash-screen";
+import { getAuth, onAuthStateChanged, User } from "firebase/auth";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { useFonts } from "expo-font";
+import { View } from "react-native";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -17,15 +17,14 @@ export default function RootLayout() {
     const [authReady, setAuthReady] = useState(false);
 
     const [fontsLoaded] = useFonts({
-        SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
+        SpaceMono: require("../assets/fonts/SpaceMono-Regular.ttf"),
     });
 
-    // 🔥 AUTH LISTENER (only source of truth)
     useEffect(() => {
         const auth = getAuth();
 
-        const unsub = onAuthStateChanged(auth, (u) => {
-            setUser(u);
+        const unsub = onAuthStateChanged(auth, (currentUser) => {
+            setUser(currentUser);
             setAuthReady(true);
         });
 
@@ -37,26 +36,29 @@ export default function RootLayout() {
 
         const firstSegment = segments?.[0];
 
-        const inAuth = segments?.[0] === "SignIn" || segments?.[0] === "SignUp";
+        const inAuth =
+            firstSegment === "SignIn" ||
+            firstSegment === "SignUp" ||
+            firstSegment === "finishSignUp";
+
         const inTabsGroup = firstSegment === "(tabs)";
 
         if (!user && inTabsGroup) {
             router.replace("/SignIn");
+            return;
         }
 
         if (user && inAuth) {
-            router.replace("/HomeScreen");
+            router.replace("/(tabs)");
         }
     }, [user, authReady, segments]);
 
-    // 🔥 Splash control
     useEffect(() => {
         if (authReady && fontsLoaded) {
             SplashScreen.hideAsync();
         }
     }, [authReady, fontsLoaded]);
 
-    // 🔥 BLOCK UI until ready (IMPORTANT)
     if (!authReady || !fontsLoaded) {
         return <View style={{ flex: 1, backgroundColor: "#fff" }} />;
     }

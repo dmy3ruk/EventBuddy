@@ -1,8 +1,6 @@
-import { Redirect } from 'expo-router';
-import { getAuth } from 'firebase/auth';
+// app/(tabs)/index.tsx
+import HomeScreen from "./HomeScreen"; // перевір шлях
 
 export default function Index() {
-    const user = getAuth().currentUser;
-
-    return <Redirect href={user ? "/(tabs)" : "/SignIn"} />;
+    return <HomeScreen />;
 }

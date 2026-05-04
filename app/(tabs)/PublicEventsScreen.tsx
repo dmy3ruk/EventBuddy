@@ -47,13 +47,17 @@ export default function PublicEventsScreen() {
     }, []);
 
     const filteredEvents = useMemo(() => {
-        const todayStr = new Date().toISOString().split('T')[0];
-        return events.filter(e => {
+        const todayStr = new Date().toISOString().split("T")[0];
+
+        return events.filter((e: any) => {
+            if (e.isDeleted) return false;
+            if (e.hiddenFor?.includes(uid)) return false;
             if (e.date < todayStr) return false;
             if (activeCategory !== "All" && e.category !== activeCategory) return false;
+
             return true;
         });
-    }, [events, activeCategory]);
+    }, [events, activeCategory, uid]);
 
     const handleJoinToggle = async (eventId: string) => {
         if (!uid) return;

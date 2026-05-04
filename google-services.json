@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "836562128145",
+    "project_id": "eventbuddy-81cbc",
+    "storage_bucket": "eventbuddy-81cbc.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:836562128145:android:b22d49d62e51a4b475d0b0",
+        "android_client_info": {
+          "package_name": "com.alinadmytruk.eventbuddy"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "836562128145-ehs4p73dosq3de25o6pvlvtvb0ukg5l5.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyASn3jnCPS42F-xO1YPBqbgvNhso_Fd7s8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "836562128145-ehs4p73dosq3de25o6pvlvtvb0ukg5l5.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

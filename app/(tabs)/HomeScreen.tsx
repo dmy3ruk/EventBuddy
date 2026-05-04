@@ -6,16 +6,18 @@ import {SafeAreaView} from "react-native-safe-area-context";
 import * as Haptics from 'expo-haptics';
 import {Ionicons, MaterialCommunityIcons} from "@expo/vector-icons";
 import {getAuth} from "firebase/auth";
-import {collection, query, orderBy, onSnapshot} from "firebase/firestore";
-import {db} from "../../FirebaseConfig";
+import {collection, query, orderBy, onSnapshot, getDoc, doc} from "firebase/firestore";
+import {auth, db} from "../../FirebaseConfig";
 import {useNavigation} from "@react-navigation/native";
 import {useBottomTabBarHeight} from '@react-navigation/bottom-tabs';
-
+import { scheduleEventReminder } from "../../utils/Notification";
+import { registerForPushNotificationsAsync } from "../../utils/Notification";
 import EventCard from "../../components/events/EventCard";
 import CreateEventModal from "../../components/modals/CreateEventModal";
 import {EventFull} from "../../utils/types";
 import {filterEventsByTab, getTodayEvent} from "../../utils/eventUtils";
-import {fetchUsername, acceptInvite, declineInvite} from "../../utils/firestoreHelpers";
+import {fetchUsername, acceptInvite, declineInvite} from "../../utils/firestoreService";
+
 
 const COLORS = {
     accent: "#505BEB",
@@ -39,15 +41,30 @@ export default function HomeScreen() {
     const [events, setEvents] = useState<EventFull[]>([]);
     const [username, setUsername] = useState<string | null>(null);
     const [loading, setLoading] = useState(true); // Стан для анімації завантаження
+    const [isAdmin, setIsAdmin] = useState(false);
 
+    useEffect(() => {
+        const checkRole = async () => {
+            if (auth.currentUser) {
+                const userDoc = await getDoc(doc(db, "users", auth.currentUser.uid));
+                if (userDoc.exists() && userDoc.data().role === 'admin') {
+                    setIsAdmin(true);
+                }
+            }
+        };
+        checkRole();
+    }, []);
     // Завантажуємо ім'я юзера
     useEffect(() => {
         const loadUser = async () => {
             const name = await fetchUsername();
             if (name) setUsername(name);
+
+            // РЕЄСТРАЦІЯ ТОКЕНА
+            if (uid) registerForPushNotificationsAsync(uid);
         };
         loadUser();
-    }, []);
+    }, [uid]);
 
     // Слухаємо базу даних в реальному часі
     useEffect(() => {
@@ -70,8 +87,21 @@ export default function HomeScreen() {
     }, []);
 
     // Фільтрація подій
-    const filteredEvents = useMemo(() => filterEventsByTab(events, activeTab, uid), [events, activeTab, uid]);
-    const todayEvent = useMemo(() => getTodayEvent(events), [events]);
+    const visibleEvents = useMemo(() => {
+        return events.filter((e: any) => {
+            if (e.isDeleted) return false;
+            if (e.hiddenFor?.includes(uid)) return false;
+
+            return true;
+        });
+    }, [events, uid]);
+
+    const filteredEvents = useMemo(
+        () => filterEventsByTab(visibleEvents, activeTab, uid),
+        [visibleEvents, activeTab, uid]
+    );
+
+    const todayEvent = useMemo(() => getTodayEvent(visibleEvents), [visibleEvents]);
 
     const handleTabChange = (tab: any) => {
         if (Platform.OS === 'ios') Haptics.selectionAsync();
@@ -88,6 +118,17 @@ export default function HomeScreen() {
         });
     };
 
+    const handleAcceptInvite = async (item: EventFull) => {
+        try {
+            await acceptInvite(item.id);
+            // 2. Ставимо локальне нагадування на телефон
+            await scheduleEventReminder(item.name, item.date);
+
+            if (Platform.OS === 'ios') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        } catch (e) {
+            console.error("Error accepting invite:", e);
+        }
+    };
     return (
         <SafeAreaView style={styles.safeArea} edges={['top']}>
             <StatusBar barStyle="dark-content"/>
@@ -193,7 +234,7 @@ export default function HomeScreen() {
                                     item={item}
                                     uid={uid}
                                     onOpenChat={openChat}
-                                    onAccept={acceptInvite}
+                                    onAccept={() => handleAcceptInvite(item)} // Ось тут зміна
                                     onDecline={declineInvite}
                                 />
                             </View>
@@ -202,18 +243,18 @@ export default function HomeScreen() {
                 />
 
                 {/* FAB */}
-                <TouchableOpacity
-                    activeOpacity={0.8}
-                    style={[styles.fab, {bottom: tabBarHeight + 15}]}
-                    onPress={() => {
-                        if (Platform.OS === "ios") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                        setModalVisible(true);
-                    }}
-                >
-                    <Ionicons name="add" size={32} color="#FFF"/>
-                </TouchableOpacity>
+                {/*<TouchableOpacity*/}
+                {/*    activeOpacity={0.8}*/}
+                {/*    style={[styles.fab, {bottom: tabBarHeight + 24}]}*/}
+                {/*    onPress={() => {*/}
+                {/*        if (Platform.OS === "ios") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);*/}
+                {/*        setModalVisible(true);*/}
+                {/*    }}*/}
+                {/*>*/}
+                {/*    <Ionicons name="add" size={32} color="#FFF"/>*/}
+                {/*</TouchableOpacity>*/}
 
-                <CreateEventModal visible={isModalVisible} closeModal={() => setModalVisible(false)}/>
+                {/*<CreateEventModal visible={isModalVisible} closeModal={() => setModalVisible(false)}/>*/}
             </View>
         </SafeAreaView>
     );

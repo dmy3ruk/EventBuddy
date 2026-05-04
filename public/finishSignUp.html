@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Opening EventBuddy...</title>
+</head>
+<body>
+<p style="font-size:18px;">Opening EventBuddy...</p>
+
+<script>
+    const originalLink = encodeURIComponent(window.location.href);
+    const appLink = "eventbuddy://finishSignUp?link=" + originalLink;
+
+    setTimeout(() => {
+        window.location.href = appLink;
+    }, 300);
+</script>
+</body>
+</html>

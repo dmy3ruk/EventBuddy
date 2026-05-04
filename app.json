@@ -5,7 +5,11 @@
     "version": "1.0.0",
     "extra": {
       "cloudinaryCloudName": "process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME",
-      "cloudinaryUploadPreset": "process.env.EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET"
+      "cloudinaryUploadPreset": "process.env.EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET",
+      "router": {},
+      "eas": {
+        "projectId": "643f517e-fd55-4c5d-93d7-101c7580e791"
+      }
     },
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -14,9 +18,15 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.eventBuddy"
+      "bundleIdentifier": "com.anonymous.eventBuddy",
+      "googleServicesFile": "./GoogleService-Info.plist",
+      "associatedDomains": [
+        "applinks:eventbuddy-81cbc.firebaseapp.com"
+      ]
     },
     "android": {
+      "package": "com.alinadmytruk.eventbuddy",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -43,6 +53,7 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "owner": "dmy3ruk"
   }
 }

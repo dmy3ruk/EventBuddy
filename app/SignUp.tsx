@@ -1,106 +1,225 @@
-import {Text, StyleSheet, TextInput, TouchableOpacity, SafeAreaView, View} from 'react-native'
-import React, {useState} from 'react'
-import {auth, db} from '../FirebaseConfig'
-import {createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile} from 'firebase/auth'
-import {Link, router} from 'expo-router'
-import { doc, getDoc, setDoc, collection, query, where, getDocs } from "firebase/firestore";
+import React, { useState } from "react";
+import {
+    View, Text, TextInput, TouchableOpacity,
+    StyleSheet, SafeAreaView, Alert, Platform,
+    ActivityIndicator, KeyboardAvoidingView, ScrollView,
+} from "react-native";
+import { router } from "expo-router";
+import { getFunctions, httpsCallable } from "firebase/functions";
+import { collection, query, where, getDocs } from "firebase/firestore";
+import * as AppleAuthentication from "expo-apple-authentication";
+import { Ionicons } from "@expo/vector-icons";
+import { db } from "@/FirebaseConfig";
+import { useGoogleSignIn } from "@/hooks/UseGoogleSignIn";
 
+const functions = getFunctions();
 
-const SignUp = () => {
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [name, setName] = useState(''); // нове поле для імені
+type Field = "name" | "email";
 
+export default function SignUp() {
+    const [name, setName] = useState("");
+    const [email, setEmail] = useState("");
+    const [loading, setLoading] = useState(false);
+    const [errors, setErrors] = useState<Partial<Record<Field, string>>>({});
 
-    const signUp = async () => {
+    const { promptAsync, request } = useGoogleSignIn(() => router.replace("/(tabs)"));
+
+    // --- Валідація ---
+    const validate = (): boolean => {
+        const newErrors: Partial<Record<Field, string>> = {};
+
+        const trimmedName = name.trim();
+        const trimmedEmail = email.trim().toLowerCase();
+
+        if (!trimmedName) {
+            newErrors.name = "Введи ім'я";
+        } else if (trimmedName.length < 2) {
+            newErrors.name = "Мінімум 2 символи";
+        } else if (!/^[a-zA-Zа-яА-ЯіІїЇєЄ0-9_]+$/.test(trimmedName)) {
+            newErrors.name = "Тільки літери, цифри та _";
+        }
+
+        if (!trimmedEmail) {
+            newErrors.email = "Введи email";
+        } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+            newErrors.email = "Невірний формат email";
+        }
+
+        setErrors(newErrors);
+        return Object.keys(newErrors).length === 0;
+    };
+
+    const handleContinue = async () => {
+        if (!validate()) return;
+
+        const trimmedName = name.trim();
+        const trimmedEmail = email.trim().toLowerCase();
+
+        setLoading(true);
         try {
-            const trimmedName = name.trim();
-            const nameLower = trimmedName.toLowerCase();
-
-            if (!trimmedName || !email || !password) {
-                alert("All fields are required");
-                return;
-            }
-
-            // 1) Перевірка унікальності
+            // Перевірка унікальності username
             const usernamesRef = collection(db, "usernames");
-            const q = query(usernamesRef, where("usernameLower", "==", nameLower));
+            const q = query(usernamesRef, where("usernameLower", "==", trimmedName.toLowerCase()));
             const snap = await getDocs(q);
 
             if (!snap.empty) {
-                alert("This username is already taken. Please choose another.");
+                setErrors({ name: "Це ім'я вже зайнято" });
                 return;
             }
 
-            // 2) Створення юзера
-            const userCred = await createUserWithEmailAndPassword(auth, email, password);
-            const user = userCred.user;
+            // Надіслати OTP
+            const sendOTP = httpsCallable(functions, "sendOTP");
+            await sendOTP({ email: trimmedEmail });
 
-            // 3) Зберігання даних юзера
-            await setDoc(doc(db, "usernames", user.uid), {
-                username: trimmedName,
-                usernameLower: nameLower,
-                email,
-                createdAt: new Date(),
+            router.push({
+                pathname: "/VerifyOTP",
+                params: {
+                    email: trimmedEmail,
+                    username: trimmedName,
+                    mode: "signup",
+                },
             });
-
-            router.replace("/(tabs)/HomeScreen");
-
-        } catch (error: any) {
-            alert("Sign-up failed: " + error.message);
+        } catch (err: any) {
+            Alert.alert("Помилка", err.message ?? "Спробуй ще раз");
+        } finally {
+            setLoading(false);
         }
     };
 
-
-
     return (
         <SafeAreaView style={styles.container}>
-            <View style={styles.signIn}>
-                <View style={styles.welcomeView}>
-                    <Text style={styles.headline}>Welcome</Text>
-                    <Text style={{color: "#6E7D93", textAlign:'center'}}>Sign up to start planning your great moments</Text>
-                </View>
-                <View style={{gap:20}}>
-                    <View>
-                        <Text>Name</Text>
-                        <TextInput
-                            style={styles.signInInput}
-                            placeholder="Your name"
-                            placeholderTextColor="#B7BFCA"
-                            value={name}
-                            onChangeText={setName}
-                        />
+            <KeyboardAvoidingView
+                behavior={Platform.OS === "ios" ? "padding" : "height"}
+                style={{ flex: 1 }}
+            >
+                <ScrollView
+                    contentContainerStyle={styles.scroll}
+                    keyboardShouldPersistTaps="handled"
+                    showsVerticalScrollIndicator={false}
+                >
+                    {/* Заголовок */}
+                    <View style={styles.header}>
+                        <Text style={styles.headline}>Створити акаунт</Text>
+                        <Text style={styles.subtitle}>
+                            Зареєструйся щоб знаходити події поруч
+                        </Text>
                     </View>
 
-                    <View>
-                <Text>Email</Text>
-                <TextInput style={styles.signInInput} placeholder="email" value={email} placeholderTextColor="#B7BFCA"
-                           onChangeText={setEmail}/>
-                </View>
+                    {/* Соціальні кнопки */}
+                    <View style={styles.socialGroup}>
+                        <TouchableOpacity
+                            style={styles.socialButton}
+                            onPress={() => promptAsync()}
+                            disabled={!request}
+                            activeOpacity={0.7}
+                        >
+                            <Ionicons name="logo-google" size={20} color="#333" />
+                            <Text style={styles.socialText}>Продовжити з Google</Text>
+                        </TouchableOpacity>
 
-                <View>
-                <Text>Password</Text>
-                <TextInput style={styles.signInInput} placeholder="password" placeholderTextColor="#B7BFCA"
-                           value={password} onChangeText={setPassword} secureTextEntry/>
-                </View>
+                    </View>
 
-                </View>
-                <TouchableOpacity style={styles.signInButton} onPress={signUp}>
-                    <Text style={{color: 'white'}}>Sign Up</Text>
-                </TouchableOpacity>
+                    {/* Розділювач */}
+                    <View style={styles.divider}>
+                        <View style={styles.dividerLine} />
+                        <Text style={styles.dividerText}>або з email</Text>
+                        <View style={styles.dividerLine} />
+                    </View>
 
-                <Text style={{color: '#6E7D93'}}>
-                    {"Already have an account? "}
-                    <Text
-                        style={{color:"#505BEB", fontWeight:"bold"}}
-                        onPress={() => router.push('/SignIn')}
+                    {/* Форма */}
+                    <View style={styles.form}>
+                        {/* Ім'я */}
+                        <View style={styles.fieldGroup}>
+                            <Text style={styles.label}>Ім'я користувача</Text>
+                            <TextInput
+                                style={[
+                                    styles.input,
+                                    errors.name ? styles.inputError : null,
+                                ]}
+                                placeholder="your_name"
+                                placeholderTextColor="#B7BFCA"
+                                value={name}
+                                onChangeText={(v) => {
+                                    setName(v);
+                                    if (errors.name) setErrors((e) => ({ ...e, name: undefined }));
+                                }}
+                                autoCapitalize="none"
+                                autoCorrect={false}
+                            />
+                            {errors.name ? (
+                                <Text style={styles.errorText}>{errors.name}</Text>
+                            ) : (
+                                <Text style={styles.hint}>
+                                    Буде видно іншим користувачам
+                                </Text>
+                            )}
+                        </View>
+
+                        {/* Email */}
+                        <View style={styles.fieldGroup}>
+                            <Text style={styles.label}>Email</Text>
+                            <TextInput
+                                style={[
+                                    styles.input,
+                                    errors.email ? styles.inputError : null,
+                                ]}
+                                placeholder="email@example.com"
+                                placeholderTextColor="#B7BFCA"
+                                value={email}
+                                onChangeText={(v) => {
+                                    setEmail(v);
+                                    if (errors.email) setErrors((e) => ({ ...e, email: undefined }));
+                                }}
+                                keyboardType="email-address"
+                                autoCapitalize="none"
+                                autoCorrect={false}
+                            />
+                            {errors.email ? (
+                                <Text style={styles.errorText}>{errors.email}</Text>
+                            ) : (
+                                <Text style={styles.hint}>
+                                    Надішлемо код підтвердження
+                                </Text>
+                            )}
+                        </View>
+                    </View>
+
+                    {/* Кнопка */}
+                    <TouchableOpacity
+                        style={[styles.primaryButton, loading && styles.primaryButtonDisabled]}
+                        onPress={handleContinue}
+                        disabled={loading}
+                        activeOpacity={0.8}
                     >
-                        Sign In
+                        {loading ? (
+                            <ActivityIndicator color="#fff" />
+                        ) : (
+                            <Text style={styles.primaryButtonText}>Далі →</Text>
+                        )}
+                    </TouchableOpacity>
+
+                    {/* Угода */}
+                    <Text style={styles.terms}>
+                        Реєструючись, ти погоджуєшся з{" "}
+                        <Text style={styles.termsLink}>Умовами використання</Text>
+                        {" "}та{" "}
+                        <Text style={styles.termsLink}>Політикою конфіденційності</Text>
                     </Text>
-                </Text>
-            </View>
+
+                    {/* Вже є акаунт */}
+                    <TouchableOpacity
+                        onPress={() => router.push("/SignIn")}
+                        style={styles.signInLink}
+                    >
+                        <Text style={styles.signInText}>
+                            Вже є акаунт?{" "}
+                            <Text style={styles.signInTextBold}>Увійти</Text>
+                        </Text>
+                    </TouchableOpacity>
+                </ScrollView>
+            </KeyboardAvoidingView>
         </SafeAreaView>
-    )
+    );
 }
 
 const styles = StyleSheet.create({
@@ -108,85 +227,135 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: "#fff",
     },
-    headline: {
-        height: 36,
-        fontFamily: 'Inter',
-        fontStyle: 'normal',
-        fontWeight: '700',
-        fontSize: 24,
-        lineHeight: 36,
-        textAlign: 'center',
-        color: '#000000',
-        flexGrow: 0,
+    scroll: {
+        flexGrow: 1,
+        paddingHorizontal: 24,
+        paddingTop: 48,
+        paddingBottom: 32,
+        gap: 24,
     },
-    signInButton: {
-        flexDirection: 'row',
-        justifyContent: 'center',
-        alignItems: 'center',
-        padding: 10,
-        borderWidth: 0.5,
-        borderColor: '#D6D6D6',
-        borderRadius: 8,
-        backgroundColor: '#505BEB',
-        width: 330,
-        height: 48,
+    header: {
+        gap: 6,
+    },
+    headline: {
+        fontSize: 28,
+        fontWeight: "700",
+        color: "#0D0D0D",
+        letterSpacing: -0.5,
+    },
+    subtitle: {
+        fontSize: 15,
+        color: "#6E7D93",
+        lineHeight: 22,
+    },
+    socialGroup: {
+        gap: 12,
+    },
+    socialButton: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 10,
+        height: 50,
+        borderRadius: 10,
+        borderWidth: 1.5,
+        borderColor: "#E2E5EA",
+        backgroundColor: "#FAFAFA",
+    },
+    socialText: {
+        fontSize: 15,
+        fontWeight: "600",
+        color: "#1A1A1A",
+    },
+    appleButton: {
+        height: 50,
+        width: "100%",
+    },
+    divider: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
+    },
+    dividerLine: {
+        flex: 1,
+        height: 1,
+        backgroundColor: "#EAECEF",
+    },
+    dividerText: {
+        fontSize: 13,
+        color: "#9AA3AF",
+        fontWeight: "500",
+    },
+    form: {
+        gap: 20,
+    },
+    fieldGroup: {
+        gap: 6,
+    },
+    label: {
+        fontSize: 14,
+        fontWeight: "600",
+        color: "#333",
+    },
+    input: {
+        height: 50,
+        paddingHorizontal: 14,
+        backgroundColor: "#F8F9FA",
+        borderWidth: 1.5,
+        borderColor: "#E2E5EA",
+        borderRadius: 10,
+        fontSize: 15,
+        color: "#0D0D0D",
+    },
+    inputError: {
+        borderColor: "#FF4D4F",
+        backgroundColor: "#FFF5F5",
+    },
+    errorText: {
+        fontSize: 12,
+        color: "#FF4D4F",
+        fontWeight: "500",
+    },
+    hint: {
+        fontSize: 12,
+        color: "#9AA3AF",
+    },
+    primaryButton: {
+        height: 52,
+        backgroundColor: "#505BEB",
+        borderRadius: 12,
+        justifyContent: "center",
+        alignItems: "center",
+    },
+    primaryButtonDisabled: {
+        opacity: 0.6,
+    },
+    primaryButtonText: {
+        color: "#fff",
+        fontSize: 16,
+        fontWeight: "700",
+        letterSpacing: 0.2,
+    },
+    terms: {
+        fontSize: 12,
+        color: "#9AA3AF",
+        textAlign: "center",
+        lineHeight: 18,
+    },
+    termsLink: {
+        color: "#505BEB",
+        fontWeight: "500",
+    },
+    signInLink: {
+        alignItems: "center",
+        paddingVertical: 4,
     },
     signInText: {
-        fontFamily: 'Inter',
-        fontWeight: '400',
-        fontSize: 12,
-        lineHeight: 28,
-        color: '#FFFFFF',
+        fontSize: 14,
+        color: "#6E7D93",
     },
-    signInInput: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        padding: 10,
-        gap: 8, // Підтримується в нових версіях RN або можна через margin
-        width: 330,
-        height: 48,
-        backgroundColor: '#F8F9FA',
-        borderWidth: 0.5,
-        borderColor: '#D6D6D6',
-        borderRadius: 8,
+    signInTextBold: {
+        color: "#505BEB",
+        fontWeight: "700",
     },
-    forgotPassword: {
-        fontFamily: 'Inter',
-        fontWeight: '400',
-        fontSize: 12,
-        lineHeight: 15,
-        color: 'rgba(80,91,235,0.59)',
-    },
-    frame: {
-        position: 'absolute',
-        top: 210,
-        left: 31,
-        width: 330,
-        height: 268,
-        flexDirection: 'column',
-        alignItems: 'flex-start',
-        padding: 0,
-        // gap: 20, // або робити marginBottom на дочірніх елементах
-    },
-    signIn: {
-        backgroundColor:"white",
-        gap: 24,
-        marginTop:100,
-        flexDirection: 'column',
-        alignItems: 'center',
-        padding: 0,
-    },
-    welcomeView: {
-        backgroundColor:"white",
-        flexDirection: 'column',
-        textAlign: 'center',
-        justifyContent: 'center',
-        alignItems: 'center',
-        paddingTop: 0,
-        paddingBottom: 1.5,
-        paddingHorizontal: 16,
-        gap: 16, // Підтримується в нових версіях RN або можна робити marginBottom
-        alignSelf: 'stretch',
-    }
 });
-export default SignUp;
