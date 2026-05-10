@@ -5,15 +5,11 @@
     <title>Opening EventBuddy...</title>
 </head>
 <body>
-<p style="font-size:18px;">Opening EventBuddy...</p>
-
+<p>Opening EventBuddy...</p>
 <script>
     const originalLink = encodeURIComponent(window.location.href);
     const appLink = "eventbuddy://finishSignUp?link=" + originalLink;
-
-    setTimeout(() => {
-        window.location.href = appLink;
-    }, 300);
+    window.location.href = appLink;
 </script>
 </body>
 </html>

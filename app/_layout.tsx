@@ -2,7 +2,7 @@ import "react-native-gesture-handler";
 import { useEffect, useState } from "react";
 import { Stack, useRouter, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import { getAuth, onAuthStateChanged, User } from "firebase/auth";
+import { getAuth, onAuthStateChanged, User, reload } from "firebase/auth";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { useFonts } from "expo-font";
 import { View } from "react-native";
@@ -23,8 +23,14 @@ export default function RootLayout() {
     useEffect(() => {
         const auth = getAuth();
 
-        const unsub = onAuthStateChanged(auth, (currentUser) => {
-            setUser(currentUser);
+        const unsub = onAuthStateChanged(auth, async (currentUser) => {
+            if (currentUser) {
+                await reload(currentUser);
+                setUser(getAuth().currentUser);
+            } else {
+                setUser(null);
+            }
+
             setAuthReady(true);
         });
 
@@ -39,16 +45,27 @@ export default function RootLayout() {
         const inAuth =
             firstSegment === "SignIn" ||
             firstSegment === "SignUp" ||
+            firstSegment === "VerifyEmail" ||
             firstSegment === "finishSignUp";
 
+        const inVerifyEmail = firstSegment === "VerifyEmail";
         const inTabsGroup = firstSegment === "(tabs)";
 
-        if (!user && inTabsGroup) {
-            router.replace("/SignIn");
+        if (!user) {
+            if (!inAuth) {
+                router.replace("/SignIn");
+            }
             return;
         }
 
-        if (user && inAuth) {
+        if (user && !user.emailVerified) {
+            if (!inVerifyEmail) {
+                router.replace("/VerifyEmail");
+            }
+            return;
+        }
+
+        if (user && user.emailVerified && inAuth) {
             router.replace("/(tabs)");
         }
     }, [user, authReady, segments]);

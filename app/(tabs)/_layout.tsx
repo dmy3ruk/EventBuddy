@@ -7,6 +7,7 @@ import Svg, { Path } from 'react-native-svg';
 import * as Haptics from "expo-haptics";
 import * as Linking from 'expo-linking'; // Для Deep Linking
 import { isSignInWithEmailLink, signInWithEmailLink } from "firebase/auth"; // Для Magic Link
+import AchievementWatcher from "@/components/AchievementWatcher";
 
 import AdminReportsScreen from "./AdminReportsScreen";
 import HomeScreen from "./HomeScreen";
@@ -188,17 +189,41 @@ const getIcon = (name: string) => {
 };
 
 export default function TabLayout() {
+    const [uid, setUid] = useState<string | null>(null);
+    const [emailVerified, setEmailVerified] = useState(false);
+
+    useEffect(() => {
+        const unsub = auth.onAuthStateChanged((user) => {
+            if (user) {
+                setUid(user.uid);
+                setEmailVerified(user.emailVerified);
+            } else {
+                setUid(null);
+                setEmailVerified(false);
+            }
+        });
+
+        return unsub;
+    }, []);
+
     return (
-        <Tab.Navigator screenOptions={{ headerShown: false }} tabBar={(props) => <CustomTabBar {...props} />}>
-            <Tab.Screen name="Home" component={HomeScreen} />
-            <Tab.Screen name="Public Events" component={PublicEventsScreen} />
-            <Tab.Screen name="Friends" component={FriendsScreen} />
-            <Tab.Screen name="Profile" component={ProfileScreen} />
-            <Tab.Screen name="Calendar" component={CalendarScreen} />
-            <Tab.Screen name="Chat" component={ChatScreen} />
-            <Tab.Screen name="Chats" component={ChatsListScreen} />
-            <Tab.Screen name="Admin" component={AdminReportsScreen} />
-        </Tab.Navigator>
+        <>
+            <Tab.Navigator
+                screenOptions={{ headerShown: false }}
+                tabBar={(props) => <CustomTabBar {...props} />}
+            >
+                <Tab.Screen name="Home" component={HomeScreen} />
+                <Tab.Screen name="Public Events" component={PublicEventsScreen} />
+                <Tab.Screen name="Friends" component={FriendsScreen} />
+                <Tab.Screen name="Profile" component={ProfileScreen} />
+                <Tab.Screen name="Calendar" component={CalendarScreen} />
+                <Tab.Screen name="Chat" component={ChatScreen} />
+                <Tab.Screen name="Chats" component={ChatsListScreen} />
+                <Tab.Screen name="Admin" component={AdminReportsScreen} />
+            </Tab.Navigator>
+
+            {uid && emailVerified && <AchievementWatcher uid={uid} />}
+        </>
     );
 }
 

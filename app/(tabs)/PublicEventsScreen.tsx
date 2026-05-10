@@ -11,7 +11,7 @@ import { EVENT_CATEGORIES } from "../../utils/categories";
 import { EventFull } from "../../utils/types";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import EventCard from "@/components/events/EventCard";
+import EventCard from "@/components/EventCard";
 import { useRouter } from "expo-router";
 import {useNavigation} from "@react-navigation/native"; // Use only this for Expo Router
 
