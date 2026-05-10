@@ -12,11 +12,12 @@ import {useNavigation} from "@react-navigation/native";
 import {useBottomTabBarHeight} from '@react-navigation/bottom-tabs';
 import { scheduleEventReminder } from "../../utils/Notification";
 import { registerForPushNotificationsAsync } from "../../utils/Notification";
-import EventCard from "../../components/events/EventCard";
+import EventCard from "../../components/EventCard";
 import CreateEventModal from "../../components/modals/CreateEventModal";
 import {EventFull} from "../../utils/types";
 import {filterEventsByTab, getTodayEvent} from "../../utils/eventUtils";
 import {fetchUsername, acceptInvite, declineInvite} from "../../utils/firestoreService";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 
 const COLORS = {
@@ -34,14 +35,29 @@ const COLORS = {
 export default function HomeScreen() {
     const tabBarHeight = useBottomTabBarHeight();
     const navigation = useNavigation<any>();
-    const uid = getAuth().currentUser?.uid || "";
+
+    // ✅ Змінюємо на state замість константи
+    const [uid, setUid] = useState<string>("");
 
     const [activeTab, setActiveTab] = useState<"Upcoming" | "Invitings" | "My Events">("Upcoming");
     const [isModalVisible, setModalVisible] = useState(false);
     const [events, setEvents] = useState<EventFull[]>([]);
     const [username, setUsername] = useState<string | null>(null);
-    const [loading, setLoading] = useState(true); // Стан для анімації завантаження
+    const [loading, setLoading] = useState(true);
     const [isAdmin, setIsAdmin] = useState(false);
+
+    // ✅ Додаємо useEffect для відстеженняAuth state
+    useEffect(() => {
+        const unsubscribe = auth.onAuthStateChanged((user) => {
+            if (user) {
+                setUid(user.uid);
+            } else {
+                setUid("");
+            }
+        });
+
+        return () => unsubscribe();
+    }, []);
 
     useEffect(() => {
         const checkRole = async () => {
@@ -53,18 +69,39 @@ export default function HomeScreen() {
             }
         };
         checkRole();
-    }, []);
+    }, [uid]); // ✅ Додаємо залежність від uid
+
     // Завантажуємо ім'я юзера
     useEffect(() => {
+        // ✅ Перевіряємо, чи uid не порожній
+        if (!uid) return;
+
         const loadUser = async () => {
+            console.log("Loading username for uid:", uid); // Для діагностики
+
             const name = await fetchUsername();
-            if (name) setUsername(name);
+            console.log("Fetched username:", name); // Для діагностики
+
+            if (name) {
+                setUsername(name);
+            } else {
+                // Fallback: беремо з AsyncStorage
+                const pendingName = await AsyncStorage.getItem("pendingUsername");
+                console.log("Pending username:", pendingName); // Для діагностики
+
+                if (pendingName) {
+                    setUsername(pendingName);
+                    await AsyncStorage.removeItem("pendingUsername");
+                }
+            }
 
             // РЕЄСТРАЦІЯ ТОКЕНА
-            if (uid) registerForPushNotificationsAsync(uid);
+            registerForPushNotificationsAsync(uid);
         };
+
         loadUser();
-    }, [uid]);
+    }, [uid]); // ✅ Тепер залежить від uid state
+
 
     // Слухаємо базу даних в реальному часі
     useEffect(() => {

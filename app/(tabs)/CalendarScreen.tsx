@@ -10,7 +10,7 @@ import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from 'expo-haptics';
-import EventCard from "../../components/events/EventCard";
+import EventCard from "../../components/EventCard";
 import CreateEventModal from "../../components/modals/CreateEventModal";
 
 const COLORS = {

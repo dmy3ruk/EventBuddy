@@ -25,8 +25,8 @@ import {
   getDocs,
   limit,
 } from "firebase/firestore";
-import { db } from "../../FirebaseConfig";
-import { EventFull } from "../../utils/types";
+import { db } from "../FirebaseConfig";
+import { EventFull } from "../utils/types";
 import { Swipeable } from "react-native-gesture-handler";
 
 type Props = {
