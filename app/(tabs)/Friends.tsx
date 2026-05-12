@@ -55,25 +55,21 @@ export default function FriendsScreen() {
 
     const auth = getAuth();
 
-    // Початкове завантаження даних
+    // FIX 3: використовуємо onAuthStateChanged замість auth.currentUser
     useEffect(() => {
-        const initializeData = async () => {
-            const user = auth.currentUser;
+        const unsubscribe = auth.onAuthStateChanged(async (user) => {
             if (!user) return;
 
-            // 1. Отримуємо username
-            const docRef = doc(db, "usernames", user.uid);
+            const docRef = doc(db, "users", user.uid);
             const docSnap = await getDoc(docRef);
             if (docSnap.exists()) setMyUsername(docSnap.data().username);
 
-            // 2. Отримуємо вхідні запити відразу (для відображення червоного індикатора)
             fetchIncomingRequests();
             fetchSentRequests();
 
-            // 3. Якщо перша вкладка "My friends", завантажуємо їх
             if (activeTab === "My friends") fetchMyFriends();
-        };
-        initializeData();
+        });
+        return () => unsubscribe();
     }, []);
 
     // Оновлюємо дані при зміні вкладок
@@ -90,6 +86,8 @@ export default function FriendsScreen() {
             setLoading(true);
             const snapshot = await getDocs(collection(db, "friends", user.uid, "list"));
             setMyFriends(snapshot.docs.map(d => ({uid: d.id, username: d.data().username})));
+        } catch (e) {
+            console.error("fetchMyFriends error:", e);
         } finally {
             setLoading(false);
         }
@@ -99,21 +97,27 @@ export default function FriendsScreen() {
         const user = auth.currentUser;
         if (!user) return;
         try {
-            // setLoading(true); // Не ставимо loading тут, щоб не заважати фоновому оновленню індикатора
             const q = query(collection(db, "friendRequests"), where("toUid", "==", user.uid));
             const snapshot = await getDocs(q);
             setIncomingRequests(snapshot.docs.map(d => ({id: d.id, ...d.data()} as FriendRequest)));
+        } catch (e) {
+            console.error("fetchIncomingRequests error:", e);
         } finally {
             setLoading(false);
         }
     };
 
+    // FIX 1: додано try/catch — раніше тут міг бути unhandled promise rejection
     const fetchSentRequests = async () => {
         const user = auth.currentUser;
         if (!user) return;
-        const q = query(collection(db, "friendRequests"), where("fromUid", "==", user.uid));
-        const snapshot = await getDocs(q);
-        setSentRequests(snapshot.docs.map(d => d.data().toUid));
+        try {
+            const q = query(collection(db, "friendRequests"), where("fromUid", "==", user.uid));
+            const snapshot = await getDocs(q);
+            setSentRequests(snapshot.docs.map(d => d.data().toUid));
+        } catch (e) {
+            console.error("fetchSentRequests error:", e);
+        }
     };
 
     const handleSearchChange = async (text: string) => {
@@ -127,7 +131,7 @@ export default function FriendsScreen() {
         }
         try {
             setLoading(true);
-            const q = query(collection(db, "usernames"),
+            const q = query(collection(db, "users"),
                 where("usernameLower", ">=", trimmed),
                 where("usernameLower", "<=", trimmed + "\uf8ff")
             );
@@ -137,6 +141,8 @@ export default function FriendsScreen() {
                 .map(d => ({uid: d.id, username: d.data().username}))
                 .filter(u => u.uid !== currentUser?.uid)
             );
+        } catch (e) {
+            console.error("handleSearchChange error:", e);
         } finally {
             setLoading(false);
         }
@@ -144,18 +150,40 @@ export default function FriendsScreen() {
 
     const handleAddFriend = async (userToAdd: UserItem) => {
         const user = auth.currentUser;
-        if (!user || !myUsername) return;
+
+        if (!user) {
+            Alert.alert("Error", "You are not logged in");
+            return;
+        }
+
+        if (!myUsername) {
+            Alert.alert("Error", "Your username is not loaded or missing");
+            return;
+        }
+
         try {
-            if (Platform.OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            if (Platform.OS === "ios") {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            }
+
             setLoading(true);
+
             const requestId = `${user.uid}_${userToAdd.uid}`;
+
             await setDoc(doc(db, "friendRequests", requestId), {
-                fromUid: user.uid, fromUsername: myUsername,
-                toUid: userToAdd.uid, toUsername: userToAdd.username,
-                status: "pending", createdAt: serverTimestamp(),
+                fromUid: user.uid,
+                fromUsername: myUsername,
+                toUid: userToAdd.uid,
+                toUsername: userToAdd.username,
+                status: "pending",
+                createdAt: serverTimestamp(),
             });
+
             setSentRequests(prev => [...prev, userToAdd.uid]);
             Alert.alert("Sent", `Friend request sent to ${userToAdd.username}`);
+        } catch (e: any) {
+            console.log("Add friend error:", e);
+            Alert.alert("Error", e.message || "Failed to send friend request");
         } finally {
             setLoading(false);
         }
@@ -175,6 +203,8 @@ export default function FriendsScreen() {
             await deleteDoc(doc(db, "friendRequests", req.id));
             setIncomingRequests(prev => prev.filter(r => r.id !== req.id));
             fetchMyFriends();
+        } catch (e) {
+            console.error("handleAcceptRequest error:", e);
         } finally {
             setLoading(false);
         }
@@ -187,9 +217,13 @@ export default function FriendsScreen() {
                 text: "Remove", style: "destructive", onPress: async () => {
                     const user = auth.currentUser;
                     if (!user) return;
-                    await deleteDoc(doc(db, "friends", user.uid, "list", friend.uid));
-                    await deleteDoc(doc(db, "friends", friend.uid, "list", user.uid));
-                    setMyFriends(prev => prev.filter(f => f.uid !== friend.uid));
+                    try {
+                        await deleteDoc(doc(db, "friends", user.uid, "list", friend.uid));
+                        await deleteDoc(doc(db, "friends", friend.uid, "list", user.uid));
+                        setMyFriends(prev => prev.filter(f => f.uid !== friend.uid));
+                    } catch (e) {
+                        console.error("handleRemoveFriend error:", e);
+                    }
                 }
             }
         ]);
@@ -198,12 +232,16 @@ export default function FriendsScreen() {
     const handleInvitePress = async () => {
         const user = auth.currentUser;
         if (!user) return;
-        const inviteRef = await addDoc(collection(db, "friendInviteLinks"), {
-            ownerUid: user.uid, ownerUsername: myUsername, createdAt: serverTimestamp()
-        });
-        const link = `https://eventbuddy.app/invite/${inviteRef.id}`;
-        await Clipboard.setStringAsync(link);
-        Alert.alert("Link Copied", "Share it with your friends!");
+        try {
+            const inviteRef = await addDoc(collection(db, "friendInviteLinks"), {
+                ownerUid: user.uid, ownerUsername: myUsername, createdAt: serverTimestamp()
+            });
+            const link = `https://eventbuddy.app/invite/${inviteRef.id}`;
+            await Clipboard.setStringAsync(link);
+            Alert.alert("Link Copied", "Share it with your friends!");
+        } catch (e) {
+            console.error("handleInvitePress error:", e);
+        }
     };
 
     return (

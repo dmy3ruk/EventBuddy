@@ -34,21 +34,21 @@ export default function VerifyEmail() {
 
             if (!auth.currentUser?.emailVerified) {
                 Alert.alert(
-                    "Пошта ще не підтверджена",
-                    "Перейди на email, відкрий лист Firebase і натисни посилання підтвердження."
+                    "Email Not Verified",
+                    "Please open your email, find the Firebase verification message, and click the verification link."
                 );
                 return;
             }
 
-            // ✅ FORCE TOKEN REFRESH - This is the fix!
+            // Force token refresh
             await auth.currentUser.getIdToken(true);
 
             const username = await AsyncStorage.getItem("pendingUsername");
 
             if (!username) {
                 Alert.alert(
-                    "Помилка",
-                    "Не знайдено ім'я користувача. Спробуй зареєструватися ще раз."
+                    "Error",
+                    "Username not found. Please sign up again."
                 );
                 return;
             }
@@ -73,7 +73,7 @@ export default function VerifyEmail() {
 
             router.replace("/(tabs)");
         } catch (error: any) {
-            Alert.alert("Помилка", error.message);
+            Alert.alert("Error", error.message);
         } finally {
             setLoading(false);
         }
@@ -91,9 +91,13 @@ export default function VerifyEmail() {
 
         try {
             await sendEmailVerification(user);
-            Alert.alert("Лист надіслано", "Перевір пошту ще раз.");
+
+            Alert.alert(
+                "Email Sent",
+                "Please check your inbox again."
+            );
         } catch (error: any) {
-            Alert.alert("Помилка", error.message);
+            Alert.alert("Error", error.message);
         } finally {
             setResending(false);
         }
@@ -112,18 +116,19 @@ export default function VerifyEmail() {
 
             router.replace("/SignUp");
         } catch (error: any) {
-            Alert.alert("Помилка", error.message);
+            Alert.alert("Error", error.message);
         }
     };
 
     return (
         <SafeAreaView style={styles.container}>
             <View style={styles.content}>
-                <Text style={styles.title}>Підтверди email</Text>
+                <Text style={styles.title}>Verify Your Email</Text>
 
                 <Text style={styles.subtitle}>
-                    Ми надіслали лист підтвердження на твою пошту. Відкрий лист,
-                    натисни посилання, а потім повернись у застосунок.
+                    We sent a verification email to your inbox.
+                    Open the email, click the verification link,
+                    then return to the app.
                 </Text>
 
                 <TouchableOpacity
@@ -134,7 +139,9 @@ export default function VerifyEmail() {
                     {loading ? (
                         <ActivityIndicator color="#fff" />
                     ) : (
-                        <Text style={styles.buttonText}>Я підтвердила пошту</Text>
+                        <Text style={styles.buttonText}>
+                            I Verified My Email
+                        </Text>
                     )}
                 </TouchableOpacity>
 
@@ -144,7 +151,7 @@ export default function VerifyEmail() {
                     disabled={resending}
                 >
                     <Text style={styles.secondaryText}>
-                        {resending ? "Надсилаємо..." : "Надіслати лист ще раз"}
+                        {resending ? "Sending..." : "Send Email Again"}
                     </Text>
                 </TouchableOpacity>
 
@@ -152,7 +159,9 @@ export default function VerifyEmail() {
                     style={styles.cancelButton}
                     onPress={cancelRegistration}
                 >
-                    <Text style={styles.cancelText}>Скасувати реєстрацію</Text>
+                    <Text style={styles.cancelText}>
+                        Cancel Registration
+                    </Text>
                 </TouchableOpacity>
             </View>
         </SafeAreaView>
