@@ -6,6 +6,7 @@ import { getAuth, onAuthStateChanged, User, reload } from "firebase/auth";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { useFonts } from "expo-font";
 import { View } from "react-native";
+import { registerForPushNotificationsAsync } from "@/utils/Notification";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -38,6 +39,12 @@ export default function RootLayout() {
     }, []);
 
     useEffect(() => {
+        if (!user?.uid || !user.emailVerified) return;
+
+        registerForPushNotificationsAsync(user.uid);
+    }, [user?.uid, user?.emailVerified]);
+
+    useEffect(() => {
         if (!authReady) return;
 
         const firstSegment = segments?.[0];
@@ -49,7 +56,6 @@ export default function RootLayout() {
             firstSegment === "finishSignUp";
 
         const inVerifyEmail = firstSegment === "VerifyEmail";
-        const inTabsGroup = firstSegment === "(tabs)";
 
         if (!user) {
             if (!inAuth) {

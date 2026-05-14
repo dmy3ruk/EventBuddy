@@ -78,7 +78,13 @@ export default function AchievementModal({
     }, [visible]);
 
     return (
-        <Modal transparent visible={visible} animationType="fade">
+        <Modal
+            transparent
+            visible={visible}
+            animationType="fade"
+            hardwareAccelerated
+            onRequestClose={onClose}
+        >
             <View style={styles.overlay}>
                 <LottieView
                     source={require("../../assets/animations/confetti on transparent background.json")}
@@ -156,7 +162,7 @@ const styles = StyleSheet.create({
 
     lottie: {
         position: "absolute",
-        width: width * 2,
+        width: width,
         height: height,
         top: 0,
     },

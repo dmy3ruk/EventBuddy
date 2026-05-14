@@ -31,7 +31,7 @@ import {
 } from "../../utils/firestoreService";
 import { EventFull } from "../../utils/types";
 import { useNavigation } from "@react-navigation/native";
-import {getBadges} from "@/utils/badges";
+import { getBadges } from "@/utils/badges";
 
 const COLORS = {
     primary: "#505BEB",
@@ -59,8 +59,10 @@ export default function ProfileScreen() {
 
     const [isAdmin, setIsAdmin] = useState(false);
 
-    const [privateProfile, setPrivateProfile] = useState(false);
     const [eventNotifications, setEventNotifications] = useState(true);
+    const [defaultPrivateEvent, setDefaultPrivateEvent] = useState(false);
+    const [reminderMinutes, setReminderMinutes] = useState(60);
+    const [autoJoinChat, setAutoJoinChat] = useState(true);
 
     const navigation = useNavigation<any>();
 
@@ -98,8 +100,11 @@ export default function ProfileScreen() {
 
                     setUsername(data.username || "No username");
                     setAvatarUrl(data.avatarUrl || null);
-                    setPrivateProfile(data.privateProfile || false);
+
                     setEventNotifications(data.eventNotifications ?? true);
+                    setDefaultPrivateEvent(data.defaultPrivateEvent ?? false);
+                    setReminderMinutes(data.reminderMinutes ?? 60);
+                    setAutoJoinChat(data.autoJoinChat ?? true);
                 }
             })
             .catch((err) => console.error("Profile load error:", err));
@@ -163,27 +168,86 @@ export default function ProfileScreen() {
         totalAttendees,
     });
 
+    const reminderTimeLabel =
+        reminderMinutes === 1
+            ? "1 minute"
+            : reminderMinutes === 15
+                ? "15 minutes"
+                : reminderMinutes === 60
+                    ? "1 hour"
+                    : "1 day";
+
     const updateSetting = async (
-        key: "privateProfile" | "eventNotifications",
+        key: "eventNotifications" | "defaultPrivateEvent" | "autoJoinChat",
         value: boolean
     ) => {
         if (!currentUid) return;
 
-        if (key === "privateProfile") {
-            setPrivateProfile(value);
-        }
+        const oldEventNotifications = eventNotifications;
+        const oldDefaultPrivateEvent = defaultPrivateEvent;
+        const oldAutoJoinChat = autoJoinChat;
 
-        if (key === "eventNotifications") {
-            setEventNotifications(value);
-        }
+        if (key === "eventNotifications") setEventNotifications(value);
+        if (key === "defaultPrivateEvent") setDefaultPrivateEvent(value);
+        if (key === "autoJoinChat") setAutoJoinChat(value);
 
         try {
             await updateDoc(doc(db, "users", currentUid), {
                 [key]: value,
             });
         } catch (error) {
+            console.error("Settings update error:", error);
+
+            setEventNotifications(oldEventNotifications);
+            setDefaultPrivateEvent(oldDefaultPrivateEvent);
+            setAutoJoinChat(oldAutoJoinChat);
+
             Alert.alert("Помилка", "Не вдалося оновити налаштування");
         }
+    };
+
+    const saveReminderTime = async (minutes: number) => {
+        if (!currentUid) return;
+
+        const oldReminderMinutes = reminderMinutes;
+        setReminderMinutes(minutes);
+
+        try {
+            await updateDoc(doc(db, "users", currentUid), {
+                reminderMinutes: minutes,
+            });
+        } catch (error) {
+            console.error("Reminder time update error:", error);
+
+            setReminderMinutes(oldReminderMinutes);
+
+            Alert.alert("Помилка", "Не вдалося оновити час нагадування");
+        }
+    };
+
+    const changeReminderTime = () => {
+        Alert.alert(
+            "Reminder time",
+            "Choose when you want to be reminded",
+            [
+                {
+                    text: "1 minute",
+                    onPress: () => saveReminderTime(1),
+                },
+                {
+                    text: "1 hour",
+                    onPress: () => saveReminderTime(60),
+                },
+                {
+                    text: "1 day",
+                    onPress: () => saveReminderTime(1440),
+                },
+                {
+                    text: "Cancel",
+                    style: "cancel",
+                },
+            ]
+        );
     };
 
     const pickImage = async () => {
@@ -345,24 +409,13 @@ export default function ProfileScreen() {
                     </>
                 )}
 
-
-                <SectionTitle title="Settings" />
+                <SectionTitle title="Event Preferences" />
 
                 <View style={styles.settingsCard}>
                     <SettingRow
-                        icon="lock-outline"
-                        title="Private profile"
-                        subtitle="Hide your profile from public users"
-                        value={privateProfile}
-                        onValueChange={(value) => updateSetting("privateProfile", value)}
-                    />
-
-                    <View style={styles.divider} />
-
-                    <SettingRow
-                        icon="bell-outline"
-                        title="Event notifications"
-                        subtitle="Get reminders about upcoming events"
+                        icon="notifications-outline"
+                        title="Event reminders"
+                        subtitle="Receive reminders before upcoming events"
                         value={eventNotifications}
                         onValueChange={(value) =>
                             updateSetting("eventNotifications", value)
@@ -371,20 +424,67 @@ export default function ProfileScreen() {
 
                     <View style={styles.divider} />
 
-                    <TouchableOpacity style={styles.settingsLink}>
+                    <TouchableOpacity
+                        style={styles.settingsLink}
+                        onPress={() =>
+                            updateSetting("defaultPrivateEvent", !defaultPrivateEvent)
+                        }
+                    >
                         <View style={styles.settingIconBox}>
-                            <Ionicons name="person-outline" size={20} color={COLORS.primary} />
+                            <Ionicons
+                                name="lock-closed-outline"
+                                size={20}
+                                color={COLORS.primary}
+                            />
                         </View>
 
                         <View style={{ flex: 1 }}>
-                            <Text style={styles.settingTitle}>Edit profile</Text>
+                            <Text style={styles.settingTitle}>Default event type</Text>
                             <Text style={styles.settingSubtitle}>
-                                Change bio, username or avatar
+                                {defaultPrivateEvent
+                                    ? "Private events by default"
+                                    : "Public events by default"}
                             </Text>
                         </View>
 
-                        <Ionicons name="chevron-forward" size={20} color={COLORS.outline} />
+                        <Text style={styles.settingValue}>
+                            {defaultPrivateEvent ? "Private" : "Public"}
+                        </Text>
                     </TouchableOpacity>
+
+                    <View style={styles.divider} />
+
+                    <TouchableOpacity
+                        style={styles.settingsLink}
+                        onPress={changeReminderTime}
+                    >
+                        <View style={styles.settingIconBox}>
+                            <Ionicons name="time-outline" size={20} color={COLORS.primary} />
+                        </View>
+
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.settingTitle}>Reminder time</Text>
+                            <Text style={styles.settingSubtitle}>
+                                Notify me {reminderTimeLabel} before event
+                            </Text>
+                        </View>
+
+                        <Ionicons
+                            name="chevron-forward"
+                            size={20}
+                            color={COLORS.outline}
+                        />
+                    </TouchableOpacity>
+
+                    <View style={styles.divider} />
+
+                    <SettingRow
+                        icon="chatbubble-ellipses-outline"
+                        title="Auto-join event chat"
+                        subtitle="Join the event chat automatically after accepting"
+                        value={autoJoinChat}
+                        onValueChange={(value) => updateSetting("autoJoinChat", value)}
+                    />
                 </View>
 
                 {isAdmin && (
@@ -614,36 +714,6 @@ const styles = StyleSheet.create({
         fontWeight: "700",
         color: COLORS.onSurface,
     },
-    nextEventCard: {
-        backgroundColor: COLORS.white,
-        borderRadius: 24,
-        padding: 16,
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 14,
-        elevation: 2,
-        shadowColor: "#000",
-        shadowOpacity: 0.04,
-        shadowRadius: 6,
-    },
-    nextEventIcon: {
-        width: 48,
-        height: 48,
-        borderRadius: 16,
-        backgroundColor: COLORS.primaryContainer,
-        justifyContent: "center",
-        alignItems: "center",
-    },
-    nextEventTitle: {
-        fontSize: 15,
-        fontWeight: "800",
-        color: COLORS.onSurface,
-    },
-    nextEventSubtitle: {
-        fontSize: 12,
-        color: COLORS.outline,
-        marginTop: 4,
-    },
     settingsCard: {
         backgroundColor: COLORS.white,
         borderRadius: 24,
@@ -652,7 +722,7 @@ const styles = StyleSheet.create({
         shadowColor: "#000",
         shadowOpacity: 0.04,
         shadowRadius: 6,
-        marginBottom:96
+        marginBottom: 96,
     },
     settingRow: {
         flexDirection: "row",
@@ -681,6 +751,11 @@ const styles = StyleSheet.create({
         fontSize: 12,
         color: COLORS.outline,
         marginTop: 2,
+    },
+    settingValue: {
+        fontSize: 13,
+        fontWeight: "800",
+        color: COLORS.primary,
     },
     divider: {
         height: 1,

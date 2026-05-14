@@ -151,6 +151,76 @@ export default function ChatScreen() {
         }
     }, [messages]);
 
+    const sendChatNotifications = async (messageText: string) => {
+        if (!authUser || !eventId) return;
+
+        try {
+            const eventDoc = await getDoc(doc(db, "events", eventId));
+
+            if (!eventDoc.exists()) return;
+
+            const eventData = eventDoc.data();
+
+            const participantIds = [
+                eventData.organizerId,
+                ...(eventData.acceptedUserIds || []),
+                ...(eventData.joinedUserIds || []),
+            ];
+
+            const uniqueParticipantIds = [...new Set(participantIds)].filter(
+                (uid) => uid && uid !== authUser.uid
+            );
+
+            console.log("Sending notifications to:", uniqueParticipantIds.length, "users");
+
+            const truncatedMessage =
+                messageText.length > 100
+                    ? messageText.substring(0, 100) + "..."
+                    : messageText;
+
+            // Паралельна відправка — значно швидше при багатьох учасниках
+            const results = await Promise.allSettled(
+                uniqueParticipantIds.map(async (uid) => {
+                    const userDoc = await getDoc(doc(db, "users", uid));
+
+                    if (!userDoc.exists()) {
+                        console.log("User document not found:", uid);
+                        return;
+                    }
+
+                    const userData = userDoc.data();
+
+                    if (userData?.eventNotifications === false) {
+                        console.log("User disabled notifications:", uid);
+                        return;
+                    }
+
+                    const token = userData?.pushToken;
+
+                    if (!token) {
+                        console.log("No token for user:", uid);
+                        return;
+                    }
+
+                    await sendPushNotification(
+                        token,
+                        `New message in "${name}"`,
+                        `${currentUserName}: ${truncatedMessage}`
+                    );
+
+                    console.log("Notification sent to:", uid);
+                })
+            );
+
+            const successCount = results.filter((r) => r.status === "fulfilled").length;
+            const failCount = results.filter((r) => r.status === "rejected").length;
+
+            console.log(`Notifications: ${successCount} sent, ${failCount} failed`);
+        } catch (error) {
+            console.log("Chat notification error:", error);
+        }
+    };
+
     const handleSendMessage = async () => {
         if (!inputText.trim() || !authUser || !eventId) return;
 
@@ -175,25 +245,7 @@ export default function ChatScreen() {
                     type: "text",
                 });
 
-                const eventDoc = await getDoc(doc(db, "events", eventId));
-
-                if (eventDoc.exists()) {
-                    const eventData = eventDoc.data();
-                    const organizerId = eventData.organizerId;
-
-                    if (organizerId && organizerId !== authUser.uid) {
-                        const userDoc = await getDoc(doc(db, "usernames", organizerId));
-                        const token = userDoc.data()?.pushToken;
-
-                        if (token) {
-                            await sendPushNotification(
-                                token,
-                                `Нове повідомлення у чаті "${name}"`,
-                                `${currentUserName}: ${textToSend}`
-                            );
-                        }
-                    }
-                }
+                await sendChatNotifications(textToSend);
             }
 
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -269,6 +321,8 @@ export default function ChatScreen() {
                     "/upload/f_auto,q_auto,w_900/"
                 ),
             });
+
+            await sendChatNotifications("Sent a photo");
 
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         } catch (e) {

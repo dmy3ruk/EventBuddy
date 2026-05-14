@@ -16,6 +16,13 @@ export const getBadges = ({
             unlocked: ownerEventsCount >= 1,
         },
         {
+            id: "fan",
+            title: "Fan",
+            icon: "calendar-star",
+            color: "#505BEB",
+            unlocked: ownerEventsCount >= 4,
+        },
+        {
             id: "organizer",
             title: "Organizer",
             icon: "crown",

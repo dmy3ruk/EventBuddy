@@ -41,6 +41,9 @@ export default function AchievementWatcher({ uid }: Props) {
             collection(db, "friends", uid, "list"),
             (snap) => {
                 setFriendsCount(snap.size);
+            },
+            (error) => {
+                console.log("Friends badge watcher error:", error);
             }
         );
 
@@ -64,12 +67,13 @@ export default function AchievementWatcher({ uid }: Props) {
     }, [ownerEvents.length, friendsCount, stats.totalAttendees]);
 
     useEffect(() => {
+        let cancelled = false;
+
         const checkBadges = async () => {
-            if (!uid || badges.length === 0) return;
+            if (!uid || badges.length === 0 || visible) return;
 
             try {
                 const storageKey = `shownBadges_${uid}`;
-                // await AsyncStorage.removeItem(`shownBadges_${uid}`);
                 const shownRaw = await AsyncStorage.getItem(storageKey);
 
                 const shownBadges: string[] = shownRaw
@@ -77,33 +81,46 @@ export default function AchievementWatcher({ uid }: Props) {
                     : [];
 
                 const newBadge = badges.find(
-                    (badge) => !shownBadges.includes(badge.id)
+                    (badge) => badge.id && !shownBadges.includes(badge.id)
                 );
 
-                if (!newBadge) return;
-
-                setAchievement(newBadge);
-                setVisible(true);
+                if (!newBadge || cancelled) return;
 
                 await AsyncStorage.setItem(
                     storageKey,
                     JSON.stringify([...shownBadges, newBadge.id])
                 );
+
+                if (cancelled) return;
+
+                setAchievement(newBadge);
+                setVisible(true);
             } catch (error) {
                 console.log("Achievement watcher error:", error);
             }
         };
 
         checkBadges();
-    }, [badges, uid]);
+
+        return () => {
+            cancelled = true;
+        };
+    }, [badges, uid, visible]);
+
+    const handleClose = () => {
+        setVisible(false);
+        setAchievement(null);
+    };
+
+    if (!achievement) return null;
 
     return (
         <AchievementModal
             visible={visible}
-            title={achievement?.title || ""}
-            icon={achievement?.icon || "star"}
-            color={achievement?.color || "#505BEB"}
-            onClose={() => setVisible(false)}
+            title={achievement.title || ""}
+            icon={achievement.icon || "star"}
+            color={achievement.color || "#505BEB"}
+            onClose={handleClose}
         />
     );
 }

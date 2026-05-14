@@ -228,7 +228,7 @@ export default function TabLayout() {
 }
 
 const styles = StyleSheet.create({
-    wrapper: { position: "absolute", bottom: 30, width: '100%', height: 70, alignItems: 'center' },
+    wrapper: { position: "absolute", bottom: 33, width: '100%', height: 70, alignItems: 'center' },
     svgContainer: { position: 'absolute', top: 0, shadowColor: '#505BEB', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.1, shadowRadius: 15 },
     contentContainer: { flexDirection: "row", width: '94%', height: 70, alignItems: "center" },
     sideSection: { flex: 1, flexDirection: 'row', justifyContent: 'space-around' },

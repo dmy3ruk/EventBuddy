@@ -1,94 +1,214 @@
-import { Platform } from 'react-native';
-import { doc, updateDoc } from 'firebase/firestore';
-import { db } from '../FirebaseConfig';
+import { Platform } from "react-native";
+import { doc, setDoc } from "firebase/firestore";
+import { db } from "../FirebaseConfig";
 
 export async function registerForPushNotificationsAsync(uid: string) {
-    // 1. Якщо це симулятор або веб - ми просто виходимо відразу
-    // Використовуємо Platform.isPad як непряму перевірку або просто ігноруємо помилку
-    if (Platform.OS === 'web') return null;
+    if (Platform.OS === "web") return null;
 
     try {
-        // Використовуємо require замість import, щоб симулятор не ламався при завантаженні файлу
-        const Device = require('expo-device');
+        const Device = require("expo-device");
+        const Notifications = require("expo-notifications");
+        const Constants = require("expo-constants");
+
+        Notifications.setNotificationHandler({
+            handleNotification: async () => ({
+                shouldShowBanner: true,
+                shouldShowList: true,
+                shouldPlaySound: true,
+                shouldSetBadge: false,
+            }),
+        });
 
         if (!Device.isDevice) {
-            console.log("Це симулятор: реєстрація пропущена.");
+            console.log("Simulator detected: notification registration skipped.");
             return null;
         }
 
-        const Notifications = require('expo-notifications');
-
-        if (Platform.OS === 'android') {
-            await Notifications.setNotificationChannelAsync('default', {
-                name: 'default',
+        if (Platform.OS === "android") {
+            await Notifications.setNotificationChannelAsync("event-reminders", {
+                name: "Event reminders",
                 importance: Notifications.AndroidImportance.MAX,
                 vibrationPattern: [0, 250, 250, 250],
-                lightColor: '#505BEB',
+                lightColor: "#505BEB",
             });
         }
 
-        const { status: existingStatus } = await Notifications.getPermissionsAsync();
+        const { status: existingStatus } =
+            await Notifications.getPermissionsAsync();
+
         let finalStatus = existingStatus;
-        if (existingStatus !== 'granted') {
+
+        if (existingStatus !== "granted") {
             const { status } = await Notifications.requestPermissionsAsync();
             finalStatus = status;
         }
 
-        if (finalStatus !== 'granted') return null;
-
-        const token = (await Notifications.getExpoPushTokenAsync({
-            projectId: "643f517e-fd55-4c5d-93d7-101c7580e791"
-        })).data;
-
-        if (uid) {
-            await updateDoc(doc(db, "usernames", uid), {
-                pushToken: token
-            });
+        if (finalStatus !== "granted") {
+            console.log("Push notifications permission not granted.");
+            return null;
         }
+
+        const projectId =
+            Constants.expoConfig?.extra?.eas?.projectId ||
+            Constants.easConfig?.projectId ||
+            "643f517e-fd55-4c5d-93d7-101c7580e791";
+
+        const tokenResponse = await Notifications.getExpoPushTokenAsync({
+            projectId,
+        });
+
+        const token = tokenResponse.data;
+
+        await setDoc(
+            doc(db, "users", uid),
+            {
+                pushToken: token,
+                pushTokenUpdatedAt: new Date(),
+            },
+            { merge: true }
+        );
+
+        console.log("Expo push token saved:", token);
 
         return token;
     } catch (error) {
-        // Якщо нативна бібліотека не знайдена (симулятор), просто ігноруємо
+        console.log("Push notification registration error:", error);
         return null;
     }
 }
 
-export const sendPushNotification = async (targetToken: string, title: string, body: string) => {
-    const message = {
-        to: targetToken,
-        sound: 'default',
-        title: title,
-        body: body,
-    };
+export const sendPushNotification = async (
+    targetToken: string,
+    title: string,
+    body: string
+) => {
+    try {
+        if (!targetToken) return null;
 
-    await fetch('https://exp.host/--/api/v2/push/send', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(message),
-    });
+        const message = {
+            to: targetToken,
+            sound: "default",
+            title,
+            body,
+            priority: "high",
+            channelId: "event-reminders",
+        };
+
+        const response = await fetch("https://exp.host/--/api/v2/push/send", {
+            method: "POST",
+            headers: {
+                Accept: "application/json",
+                "Accept-Encoding": "gzip, deflate",
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify(message),
+        });
+
+        const data = await response.json();
+
+        console.log("Expo push response:", data);
+
+        return data;
+    } catch (error) {
+        console.log("Send push notification error:", error);
+        return null;
+    }
 };
 
-export const scheduleEventReminder = async (eventTitle: string, eventDate: string) => {
+export const scheduleEventReminder = async ({
+                                                eventTitle,
+                                                eventDate,
+                                                reminderMinutes = 60,
+                                                eventNotifications = true,
+                                            }: {
+    eventTitle: string;
+    eventDate: string;
+    reminderMinutes?: number;
+    eventNotifications?: boolean;
+}) => {
+    if (!eventNotifications) return null;
+    if (Platform.OS === "web") return null;
+
     try {
-        const Device = require('expo-device');
-        if (!Device.isDevice) return;
+        const Notifications = require("expo-notifications");
 
-        const Notifications = require('expo-notifications');
-        const triggerDate = new Date(eventDate);
-        triggerDate.setHours(triggerDate.getHours() - 1);
-
-        if (triggerDate <= new Date()) return;
-
-        await Notifications.scheduleNotificationAsync({
-            content: {
-                title: "Наближається подія! 📅",
-                body: `Подія "${eventTitle}" розпочнеться рівно за годину.`,
-            },
-            trigger: { date: triggerDate } as any,
+        Notifications.setNotificationHandler({
+            handleNotification: async () => ({
+                shouldShowBanner: true,
+                shouldShowList: true,
+                shouldPlaySound: true,
+                shouldSetBadge: false,
+            }),
         });
-    } catch (e) {
-        // Ігноруємо на симуляторі
+
+        const { status: existingStatus } =
+            await Notifications.getPermissionsAsync();
+
+        let finalStatus = existingStatus;
+
+        if (existingStatus !== "granted") {
+            const { status } = await Notifications.requestPermissionsAsync();
+            finalStatus = status;
+        }
+
+        if (finalStatus !== "granted") {
+            console.log("Notification permission not granted.");
+            return null;
+        }
+
+        if (Platform.OS === "android") {
+            await Notifications.setNotificationChannelAsync("event-reminders", {
+                name: "Event reminders",
+                importance: Notifications.AndroidImportance.MAX,
+                vibrationPattern: [0, 250, 250, 250],
+                lightColor: "#505BEB",
+            });
+        }
+
+        const eventStartDate = new Date(eventDate);
+
+        if (isNaN(eventStartDate.getTime())) {
+            console.log("Invalid event date:", eventDate);
+            return null;
+        }
+
+        const triggerDate = new Date(
+            eventStartDate.getTime() - reminderMinutes * 60 * 1000
+        );
+
+        if (triggerDate <= new Date()) {
+            console.log("Reminder time is already in the past.");
+            return null;
+        }
+
+        const reminderText =
+            reminderMinutes === 1
+                ? "in 1 minute"
+                : reminderMinutes === 15
+                    ? "in 15 minutes"
+                    : reminderMinutes === 60
+                        ? "in 1 hour"
+                        : reminderMinutes === 1440
+                            ? "in 1 day"
+                            : `in ${reminderMinutes} minutes`;
+
+        const notificationId = await Notifications.scheduleNotificationAsync({
+            content: {
+                title: "Upcoming Event 📅",
+                body: `"${eventTitle}" starts ${reminderText}.`,
+                sound: "default",
+            },
+            trigger: {
+                date: triggerDate,
+                channelId: "event-reminders",
+            } as any,
+        });
+
+        console.log("Scheduled notification:", notificationId);
+
+        return notificationId;
+    } catch (error) {
+        console.log("Schedule reminder error:", error);
+        return null;
     }
 };
