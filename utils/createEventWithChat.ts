@@ -35,14 +35,14 @@ export async function createEventWithChat(payload: EventType) {
         eventData.location = {
             latitude: payload.location.latitude,
             longitude: payload.location.longitude,
-            name: payload.location.name || "Somewhere",
+            name: payload.location.name || "Click to see location",
         };
     }
 
     const eventRef = await addDoc(collection(db, "events"), eventData);
 
     await addDoc(collection(db, "events", eventRef.id, "messages"), {
-        text: "Чат створено",
+        text: "Chat created",
         type: "system",
         createdAt: serverTimestamp(),
     });
@@ -58,12 +58,24 @@ export async function createEventWithChat(payload: EventType) {
 
     if (userSnap.exists()) {
         const data = userSnap.data();
-
         reminderMinutes = data.reminderMinutes ?? 60;
         eventNotifications = data.eventNotifications ?? true;
     }
 
-    const eventDateTime = `${payload.date}T${payload.time}`;
+    // ✅ Використовуємо готовий Date якщо переданий, інакше парсимо рядки
+    let eventDateTime: Date;
+
+    if (payload.eventDateTime instanceof Date) {
+        eventDateTime = payload.eventDateTime;
+    } else {
+        const [year, month, day] = payload.date.split("-").map(Number);
+        const [hours, minutes] = payload.time.split(":").map(Number);
+        eventDateTime = new Date(year, month - 1, day, hours, minutes);
+    }
+
+    console.log("eventDateTime:", eventDateTime.toISOString());
+    console.log("now:", new Date().toISOString());
+    console.log("diff minutes:", (eventDateTime.getTime() - Date.now()) / 60000);
 
     await scheduleEventReminder({
         eventTitle: payload.name,

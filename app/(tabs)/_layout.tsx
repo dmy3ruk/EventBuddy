@@ -1,13 +1,16 @@
 import { createBottomTabNavigator, BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { View, TouchableOpacity, Text, StyleSheet, Platform, Dimensions, Alert } from "react-native";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react"; // Додали useRef
 import { router } from "expo-router";
 import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import Svg, { Path } from 'react-native-svg';
 import * as Haptics from "expo-haptics";
-import * as Linking from 'expo-linking'; // Для Deep Linking
-import { isSignInWithEmailLink, signInWithEmailLink } from "firebase/auth"; // Для Magic Link
+import * as Linking from 'expo-linking';
+import { isSignInWithEmailLink, signInWithEmailLink } from "firebase/auth";
+import { collection, query, where, onSnapshot } from "firebase/firestore";
+
 import AchievementWatcher from "@/components/AchievementWatcher";
+import AchievementModal from "@/components/modals/AchievementModal";
 
 import AdminReportsScreen from "./AdminReportsScreen";
 import HomeScreen from "./HomeScreen";
@@ -25,7 +28,6 @@ import { registerForPushNotificationsAsync } from "@/utils/Notification";
 const Tab = createBottomTabNavigator();
 const { width } = Dimensions.get("window");
 
-// Налаштування сповіщень
 const setupNotifications = async () => {
     if (Platform.OS === 'web') return;
     try {
@@ -63,23 +65,13 @@ const TabBarBackground = () => {
 function CustomTabBar({ state, navigation }: BottomTabBarProps) {
     const [isModalVisible, setModalVisible] = useState(false);
     const [isAdmin, setIsAdmin] = useState(false);
-
+    const [achievementVisible, setAchievementVisible] = useState(false);
     useEffect(() => {
-        // --- 1. ОБРОБКА MAGIC LINK (DEEP LINKING) ---
         const handleDeepLink = async (url: string | null) => {
             if (!url) return;
 
             if (isSignInWithEmailLink(auth, url)) {
-                // В Expo/React Native ми не завжди маємо доступ до localStorage як у Вебі,
-                // але для тестів можна спробувати window.localStorage або просто prompt
-                let email = ""; // Тут має бути email, який юзер ввів при реєстрації
-
-                // Якщо ви не зберігали email в AsyncStorage, Firebase попросить його ввести
-                if (!email) {
-                    // Для диплома можна зробити просту перевірку або Alert.prompt (тільки iOS)
-                    console.log("Email link detected, but email is missing in storage");
-                }
-
+                let email = "";
                 try {
                     await signInWithEmailLink(auth, email, url);
                     Alert.alert("Success", "You have successfully signed in!");
@@ -90,13 +82,9 @@ function CustomTabBar({ state, navigation }: BottomTabBarProps) {
             }
         };
 
-        // Слухаємо посилання поки додаток відкритий
         const subscription = Linking.addEventListener('url', (event) => handleDeepLink(event.url));
-
-        // Перевіряємо посилання, якщо додаток був закритий (Cold Start)
         Linking.getInitialURL().then(handleDeepLink);
 
-        // --- 2. ПЕРЕВІРКА АВТОРИЗАЦІЇ ТА РОЛІ АДМІНА ---
         const unsub = auth.onAuthStateChanged(async (user) => {
             if (user) {
                 registerForPushNotificationsAsync(user.uid);
@@ -105,13 +93,11 @@ function CustomTabBar({ state, navigation }: BottomTabBarProps) {
                     const snap = await getDoc(doc(db, "users", user.uid));
                     if (snap.exists() && snap.data().role === "admin") {
                         setIsAdmin(true);
-                        // navigation.navigate("Admin"); // Обережно з авто-навігацією тут
                     }
                 } catch (e) {
                     console.log("Admin check error:", e);
                 }
             } else {
-                // Якщо посилання не обробляється прямо зараз - на вхід
                 const currentUrl = await Linking.getInitialURL();
                 if (!currentUrl || !isSignInWithEmailLink(auth, currentUrl)) {
                     router.replace("/SignIn");
@@ -172,7 +158,20 @@ function CustomTabBar({ state, navigation }: BottomTabBarProps) {
                 <View style={styles.placeholder} />
                 <View style={styles.sideSection}>{rightTabs.map(renderTab)}</View>
             </View>
-            <CreateEventModal visible={isModalVisible} closeModal={() => setModalVisible(false)} />
+            <CreateEventModal
+                visible={isModalVisible}
+                closeModal={() => setModalVisible(false)}
+                onFirstEventCreated={() => {
+                    setAchievementVisible(true);
+                }}
+            />
+            <AchievementModal
+                visible={achievementVisible}
+                title="First Event Creator!"
+                icon="trophy"
+                color="#505BEB"
+                onClose={() => setAchievementVisible(false)}
+            />
         </View>
     );
 }
@@ -192,6 +191,9 @@ export default function TabLayout() {
     const [uid, setUid] = useState<string | null>(null);
     const [emailVerified, setEmailVerified] = useState(false);
 
+    // Використовуємо useRef для збереження попередньої кількості подій без тригера зайвих рендерів
+    const previousCount = useRef<number | null>(null);
+
     useEffect(() => {
         const unsub = auth.onAuthStateChanged((user) => {
             if (user) {
@@ -200,11 +202,14 @@ export default function TabLayout() {
             } else {
                 setUid(null);
                 setEmailVerified(false);
+                previousCount.current = null;
             }
         });
 
         return unsub;
     }, []);
+
+
 
     return (
         <>
@@ -223,13 +228,14 @@ export default function TabLayout() {
             </Tab.Navigator>
 
             {uid && emailVerified && <AchievementWatcher uid={uid} />}
+
         </>
     );
 }
 
 const styles = StyleSheet.create({
     wrapper: { position: "absolute", bottom: 33, width: '100%', height: 70, alignItems: 'center' },
-    svgContainer: { position: 'absolute', top: 0, shadowColor: '#505BEB', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.1, shadowRadius: 15 },
+    svgContainer: { position: 'absolute', top: 0, shadowColor: '#505BEB', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.22, shadowRadius: 24 },
     contentContainer: { flexDirection: "row", width: '94%', height: 70, alignItems: "center" },
     sideSection: { flex: 1, flexDirection: 'row', justifyContent: 'space-around' },
     placeholder: { width: 85 },

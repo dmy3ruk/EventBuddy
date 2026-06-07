@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
     View,
     Text,
@@ -17,6 +17,7 @@ import { createUserWithEmailAndPassword, sendEmailVerification } from "firebase/
 import { collection, query, where, getDocs } from "firebase/firestore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { auth, db } from "@/FirebaseConfig";
+import { Ionicons } from "@expo/vector-icons";
 
 type FieldProps = {
     label: string;
@@ -30,6 +31,9 @@ type FieldProps = {
     showPassword?: boolean;
     onTogglePassword?: () => void;
     clearError?: () => void;
+    onBlur?: () => void;
+    isChecking?: boolean;
+    textContentType?: "none" | "oneTimeCode" | "emailAddress" | "username" | "password";
 };
 
 function Field({
@@ -44,20 +48,26 @@ function Field({
                    showPassword = false,
                    onTogglePassword,
                    clearError,
+                   onBlur,
+                   isChecking = false,
+                   textContentType = "none",
                }: FieldProps) {
+    const [isFocused, setIsFocused] = useState(false);
+
     return (
         <View style={styles.fieldGroup}>
             <Text style={styles.label}>{label}</Text>
 
-            <View>
+            <View style={styles.inputContainer}>
                 <TextInput
                     style={[
                         styles.input,
-                        secure ? { paddingRight: 90 } : null,
+                        secure || isChecking ? { paddingRight: 50 } : null,
                         error ? styles.inputError : null,
+                        isFocused && !error ? styles.inputFocused : null,
                     ]}
                     placeholder={placeholder}
-                    placeholderTextColor="#B7BFCA"
+                    placeholderTextColor="#94A3B8"
                     value={value}
                     onChangeText={(v) => {
                         onChange(v);
@@ -68,23 +78,40 @@ function Field({
                     autoCorrect={false}
                     keyboardType={keyboard}
                     blurOnSubmit={false}
+                    onFocus={() => setIsFocused(true)}
+                    onBlur={() => {
+                        setIsFocused(false);
+                        onBlur?.();
+                    }}
+                    textContentType={textContentType}
                 />
 
-                {secure && (
+                {isChecking && (
+                    <View style={styles.rightActivityIndicator}>
+                        <ActivityIndicator size="small" color="#6366F1" />
+                    </View>
+                )}
+
+                {secure && !isChecking && (
                     <TouchableOpacity
                         style={styles.eyeButton}
                         onPress={onTogglePassword}
-                        activeOpacity={0.7}
+                        activeOpacity={0.5}
                     >
-                        <Text style={styles.eyeText}>
-                            {showPassword ? "Hide" : "Show"}
-                        </Text>
+                        <Ionicons
+                            name={showPassword ? "eye-off-outline" : "eye-outline"}
+                            size={22}
+                            color="#64748B"
+                        />
                     </TouchableOpacity>
                 )}
             </View>
 
             {error ? (
-                <Text style={styles.errorText}>{error}</Text>
+                <View style={styles.errorContainer}>
+                    <Ionicons name="alert-circle-outline" size={14} color="#EF4444" />
+                    <Text style={styles.errorText}>{error}</Text>
+                </View>
             ) : hint ? (
                 <Text style={styles.hint}>{hint}</Text>
             ) : null}
@@ -99,46 +126,162 @@ export default function SignUp() {
     const [confirmPassword, setConfirmPassword] = useState("");
     const [showPassword, setShowPassword] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [isCheckingUsername, setIsCheckingUsername] = useState(false);
     const [errors, setErrors] = useState<Record<string, string>>({});
+
+    const setFieldError = (field: string, errorMsg: string) => {
+        setErrors((prev) => ({ ...prev, [field]: errorMsg }));
+    };
 
     const clearFieldError = (field: string) => {
         setErrors((prev) => {
             if (!prev[field]) return prev;
-
             const next = { ...prev };
             delete next[field];
             return next;
         });
     };
 
-    const validate = () => {
-        const e: Record<string, string> = {};
+    // --- Валідація форматів при втраті фокусу (onBlur) ---
+    const validateUsernameFormat = (value: string) => {
+        const trimName = value.trim();
+        if (!trimName) {
+            setFieldError("name", "Enter your username");
+            return false;
+        }
+        if (trimName.length < 2) {
+            setFieldError("name", "Minimum 2 characters");
+            return false;
+        }
+        if (!/^[a-zA-Zа-яА-ЯіІїЇєЄ0-9_]+$/.test(trimName)) {
+            setFieldError("name", "Only letters, numbers, and _ are allowed");
+            return false;
+        }
+        clearFieldError("name");
+        return true;
+    };
+
+    const validateEmailFormat = (value: string) => {
+        const trimEmail = value.trim().toLowerCase();
+        if (!trimEmail) {
+            setFieldError("email", "Enter your email");
+            return false;
+        }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimEmail)) {
+            setFieldError("email", "Invalid email format");
+            return false;
+        }
+        clearFieldError("email");
+        return true;
+    };
+
+    const validatePasswordFormat = (value: string) => {
+        if (!value) {
+            setFieldError("password", "Enter your password");
+            return false;
+        }
+        if (value.length < 6) {
+            setFieldError("password", "Minimum 6 characters");
+            return false;
+        }
+        clearFieldError("password");
+
+        if (confirmPassword && value !== confirmPassword) {
+            setFieldError("confirmPassword", "Passwords do not match");
+        } else if (confirmPassword && value === confirmPassword) {
+            clearFieldError("confirmPassword");
+        }
+        return true;
+    };
+
+    const validateConfirmPasswordFormat = (value: string) => {
+        if (!value) {
+            setFieldError("confirmPassword", "Confirm your password");
+            return false;
+        }
+        if (password !== value) {
+            setFieldError("confirmPassword", "Passwords do not match");
+            return false;
+        }
+        clearFieldError("confirmPassword");
+        return true;
+    };
+
+    // --- Зміна паролів у реальному часі (onChange) ---
+    const handlePasswordChange = (text: string) => {
+        setPassword(text);
+
+        if (errors.password && text.length >= 6) {
+            clearFieldError("password");
+        }
+
+        if (confirmPassword) {
+            if (text === confirmPassword) {
+                clearFieldError("confirmPassword");
+            } else {
+                setFieldError("confirmPassword", "Passwords do not match");
+            }
+        }
+    };
+
+    const handleConfirmPasswordChange = (text: string) => {
+        setConfirmPassword(text);
+
+        if (password === text) {
+            clearFieldError("confirmPassword");
+        } else if (errors.confirmPassword) {
+            setFieldError("confirmPassword", "Passwords do not match");
+        }
+    };
+
+    // --- Перевірка унікальності нікнейму з дебаунсом ---
+    useEffect(() => {
+        if (!name.trim()) {
+            clearFieldError("name");
+            return;
+        }
+
         const trimName = name.trim();
-        const trimEmail = email.trim().toLowerCase();
-
-        if (!trimName) e.name = "Enter your username";
-        else if (trimName.length < 2) e.name = "Minimum 2 characters";
-        else if (!/^[a-zA-Zа-яА-ЯіІїЇєЄ0-9_]+$/.test(trimName)) {
-            e.name = "Only letters, numbers, and _ are allowed";
+        if (trimName.length < 2 || !/^[a-zA-Zа-яА-ЯіІїЇєЄ0-9_]+$/.test(trimName)) {
+            validateUsernameFormat(name);
+            return;
         }
 
-        if (!trimEmail) e.email = "Enter your email";
-        else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimEmail)) {
-            e.email = "Invalid email format";
-        }
+        const delayDebounceFn = setTimeout(async () => {
+            setIsCheckingUsername(true);
+            try {
+                const q = query(
+                    collection(db, "usernames"),
+                    where("usernameLower", "==", trimName.toLowerCase())
+                );
+                const snap = await getDocs(q);
 
-        if (!password) e.password = "Enter your password";
-        else if (password.length < 6) e.password = "Minimum 6 characters";
+                if (!snap.empty) {
+                    setFieldError("name", "This username is already taken");
+                } else {
+                    clearFieldError("name");
+                }
+            } catch (err) {
+                console.error("Error checking username: ", err);
+            } finally {
+                setIsCheckingUsername(false);
+            }
+        }, 600);
 
-        if (!confirmPassword) e.confirmPassword = "Confirm your password";
-        else if (password !== confirmPassword) e.confirmPassword = "Passwords do not match";
+        return () => clearTimeout(delayDebounceFn);
+    }, [name]);
 
-        setErrors(e);
-        return Object.keys(e).length === 0;
+    const validateAll = () => {
+        const isNameOk = validateUsernameFormat(name) && !errors.name;
+        const isEmailOk = validateEmailFormat(email);
+        const isPasswordOk = validatePasswordFormat(password);
+        const isConfirmOk = validateConfirmPasswordFormat(confirmPassword);
+
+        return isNameOk && isEmailOk && isPasswordOk && isConfirmOk;
     };
 
     const handleSignUp = async () => {
-        if (!validate()) return;
+        if (!validateAll() || isCheckingUsername) return;
 
         const trimName = name.trim();
         const trimEmail = email.trim().toLowerCase();
@@ -146,18 +289,6 @@ export default function SignUp() {
         setLoading(true);
 
         try {
-            const q = query(
-                collection(db, "usernames"),
-                where("usernameLower", "==", trimName.toLowerCase())
-            );
-
-            const snap = await getDocs(q);
-
-            if (!snap.empty) {
-                setErrors({ name: "This username is already taken" });
-                return;
-            }
-
             const result = await createUserWithEmailAndPassword(auth, trimEmail, password);
             const user = result.user;
 
@@ -185,6 +316,7 @@ export default function SignUp() {
             <KeyboardAvoidingView
                 behavior={Platform.OS === "ios" ? "padding" : "height"}
                 style={{ flex: 1 }}
+                keyboardVerticalOffset={Platform.OS === "ios" ? 47 : 0}
             >
                 <ScrollView
                     contentContainerStyle={styles.scroll}
@@ -194,7 +326,7 @@ export default function SignUp() {
                     <View style={styles.header}>
                         <Text style={styles.headline}>Create Account</Text>
                         <Text style={styles.subtitle}>
-                            Sign up to discover nearby events
+                            Sign up to discover nearby events with eventBuddy
                         </Text>
                     </View>
 
@@ -206,66 +338,78 @@ export default function SignUp() {
                             placeholder="your_name"
                             error={errors.name}
                             hint="Visible to other users"
-                            clearError={() => clearFieldError("name")}
+                            isChecking={isCheckingUsername}
+                            onBlur={() => validateUsernameFormat(name)}
+                            textContentType="username"
                         />
 
                         <Field
-                            label="Email"
+                            label="Email Address"
                             value={email}
                             onChange={setEmail}
-                            placeholder="email@example.com"
+                            placeholder="name@example.com"
                             error={errors.email}
                             keyboard="email-address"
                             clearError={() => clearFieldError("email")}
+                            onBlur={() => validateEmailFormat(email)}
+                            textContentType="emailAddress"
                         />
 
                         <Field
                             label="Password"
                             value={password}
-                            onChange={setPassword}
+                            onChange={handlePasswordChange}
                             placeholder="Minimum 6 characters"
                             secure
                             error={errors.password}
                             showPassword={showPassword}
                             onTogglePassword={() => setShowPassword((s) => !s)}
-                            clearError={() => clearFieldError("password")}
+                            onBlur={() => validatePasswordFormat(password)}
+                            textContentType="oneTimeCode"
                         />
 
                         <Field
                             label="Confirm Password"
                             value={confirmPassword}
-                            onChange={setConfirmPassword}
+                            onChange={handleConfirmPasswordChange}
                             placeholder="Repeat password"
                             secure
                             error={errors.confirmPassword}
                             showPassword={showPassword}
                             onTogglePassword={() => setShowPassword((s) => !s)}
-                            clearError={() => clearFieldError("confirmPassword")}
+                            onBlur={() => validateConfirmPasswordFormat(confirmPassword)}
+                            textContentType="oneTimeCode"
                         />
                     </View>
 
-                    <TouchableOpacity
-                        style={[styles.primaryButton, loading && { opacity: 0.6 }]}
-                        onPress={handleSignUp}
-                        disabled={loading}
-                        activeOpacity={0.8}
-                    >
-                        {loading ? (
-                            <ActivityIndicator color="#fff" />
-                        ) : (
-                            <Text style={styles.primaryButtonText}>Sign Up</Text>
-                        )}
-                    </TouchableOpacity>
+                    <View style={styles.actionContainer}>
+                        <TouchableOpacity
+                            style={[
+                                styles.primaryButton,
+                                (loading || isCheckingUsername) && { opacity: 0.6 }
+                            ]}
+                            onPress={handleSignUp}
+                            disabled={loading || isCheckingUsername}
+                            activeOpacity={0.85}
+                        >
+                            {loading ? (
+                                <ActivityIndicator color="#fff" />
+                            ) : (
+                                <Text style={styles.primaryButtonText}>Create Account</Text>
+                            )}
+                        </TouchableOpacity>
 
-                    <TouchableOpacity
-                        onPress={() => router.push("/SignIn")}
-                        style={styles.signInLink}
-                    >
-                        <Text style={styles.signInText}>
-                            Already have an account?{" "}
-                            <Text style={styles.signInTextBold}>Sign In</Text>
-                        </Text>
-                    </TouchableOpacity>
+                        <TouchableOpacity
+                            onPress={() => router.push("/SignIn")}
+                            style={styles.signInLink}
+                            activeOpacity={0.7}
+                        >
+                            <Text style={styles.signInText}>
+                                Already have an account?{" "}
+                                <Text style={styles.signInTextBold}>Sign In</Text>
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
                 </ScrollView>
             </KeyboardAvoidingView>
         </SafeAreaView>
@@ -273,88 +417,106 @@ export default function SignUp() {
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: "#fff" },
+    container: { flex: 1, backgroundColor: "#FFFFFF" },
     scroll: {
         flexGrow: 1,
-        paddingHorizontal: 24,
-        paddingTop: 48,
-        paddingBottom: 32,
-        gap: 24,
+        paddingHorizontal: 28,
+        paddingTop: 50,
+        paddingBottom: 40,
+        justifyContent: "center",
+        gap: 40,
     },
-    header: { gap: 6 },
+    header: { gap: 10, marginBottom: 16 },
     headline: {
-        fontSize: 28,
-        fontWeight: "700",
-        color: "#0D0D0D",
-        letterSpacing: -0.5,
+        fontSize: 32,
+        fontWeight: "800",
+        color: "#0F172A",
+        letterSpacing: -1,
     },
     subtitle: {
-        fontSize: 15,
-        color: "#6E7D93",
+        fontSize: 16,
+        color: "#64748B",
         lineHeight: 22,
     },
-    form: { gap: 20 },
-    fieldGroup: { gap: 6 },
+    form: { gap: 24 },
+    fieldGroup: { gap: 8 },
     label: {
         fontSize: 14,
         fontWeight: "600",
-        color: "#333",
+        color: "#334155",
     },
+    inputContainer: { justifyContent: "center" },
     input: {
-        height: 50,
-        paddingHorizontal: 14,
-        backgroundColor: "#F8F9FA",
-        borderWidth: 1.5,
-        borderColor: "#E2E5EA",
-        borderRadius: 10,
-        fontSize: 15,
-        color: "#0D0D0D",
+        height: 54,
+        paddingHorizontal: 16,
+        backgroundColor: "#F8FAFC",
+        borderWidth: 1,
+        borderColor: "#E2E8F0",
+        borderRadius: 14,
+        fontSize: 16,
+        color: "#0F172A",
+    },
+    inputFocused: {
+        backgroundColor: "#FFFFFF",
+        borderColor: "#6366F1",
+        shadowColor: "#6366F1",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.08,
+        shadowRadius: 12,
+        elevation: 1,
     },
     inputError: {
-        borderColor: "#FF4D4F",
-        backgroundColor: "#FFF5F5",
+        borderColor: "#EF4444",
+        backgroundColor: "#FEF2F2",
+    },
+    errorContainer: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 4,
+        marginTop: 2,
     },
     errorText: {
-        fontSize: 12,
-        color: "#FF4D4F",
+        fontSize: 13,
+        color: "#EF4444",
         fontWeight: "500",
     },
     hint: {
-        fontSize: 12,
-        color: "#9AA3AF",
+        fontSize: 13,
+        color: "#94A3B8",
+        paddingLeft: 2,
     },
     eyeButton: {
         position: "absolute",
-        right: 14,
-        top: 15,
+        right: 16,
+        height: "100%",
+        justifyContent: "center",
     },
-    eyeText: {
-        fontSize: 13,
-        color: "#505BEB",
-        fontWeight: "500",
+    rightActivityIndicator: {
+        position: "absolute",
+        right: 16,
+        height: "100%",
+        justifyContent: "center",
     },
+    actionContainer: { gap: 16, marginTop: 12 },
     primaryButton: {
-        height: 52,
-        backgroundColor: "#505BEB",
-        borderRadius: 12,
+        height: 56,
+        backgroundColor: "#6366F1",
+        borderRadius: 16,
         justifyContent: "center",
         alignItems: "center",
+        shadowColor: "#6366F1",
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.2,
+        shadowRadius: 16,
+        elevation: 3,
     },
     primaryButtonText: {
-        color: "#fff",
+        color: "#FFFFFF",
         fontSize: 16,
         fontWeight: "700",
+        letterSpacing: -0.1,
     },
-    signInLink: {
-        alignItems: "center",
-        paddingVertical: 4,
-    },
-    signInText: {
-        fontSize: 14,
-        color: "#6E7D93",
-    },
-    signInTextBold: {
-        color: "#505BEB",
-        fontWeight: "700",
-    },
+    signInLink: { alignItems: "center", paddingVertical: 8 },
+    signInText: { fontSize: 15, color: "#64748B" },
+    signInTextBold: { color: "#6366F1", fontWeight: "700" },
 });

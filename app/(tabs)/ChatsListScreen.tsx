@@ -1,40 +1,16 @@
 import React, { useEffect, useState, useMemo } from "react";
-import {
-    View,
-    Text,
-    TouchableOpacity,
-    FlatList,
-    StyleSheet,
-    ActivityIndicator,
-    Platform,
-    StatusBar,
-    TextInput,
+import { View, Text, TouchableOpacity, FlatList, StyleSheet, ActivityIndicator, Platform, StatusBar, TextInput,
 } from "react-native";
 import { getAuth } from "firebase/auth";
-import {
-    collection,
-    onSnapshot,
-    query,
-    where,
-    doc,
-    getDoc,
-    orderBy,
+import { limit } from "firebase/firestore";
+import { collection, onSnapshot, query, where, doc, getDoc, orderBy,
 } from "firebase/firestore";
 import { db } from "../../FirebaseConfig";
 import { useNavigation } from "@react-navigation/native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Haptics from 'expo-haptics';
-
-type EventChatItem = {
-    id: string;
-    name: string;
-    date: string;
-    time: string;
-    userId: string;
-    invitedUserIds?: string[];
-    acceptedUserIds?: string[];
-};
+import {EventChatItem} from "@/utils/types";
 
 const COLORS = {
     primary: "#505BEB",
@@ -53,8 +29,6 @@ export default function ChatsListScreen() {
     const [unreadByEvent, setUnreadByEvent] = useState<Record<string, boolean>>({});
     const [showArchived, setShowArchived] = useState(false);
     const [loading, setLoading] = useState(true);
-    
-    // Пошук
     const [searchQuery, setSearchQuery] = useState("");
     const [isSearching, setIsSearching] = useState(false);
 
@@ -83,7 +57,6 @@ export default function ChatsListScreen() {
         const map = new Map<string, EventChatItem>();
         [...ownerEvents, ...acceptedEvents].forEach((ev) => map.set(ev.id, ev));
         let merged = Array.from(map.values()).filter(ev => ev.userId === user?.uid || ev.acceptedUserIds?.includes(user?.uid || ""));
-        
         // Фільтрація за пошуковим запитом
         if (searchQuery.trim().length > 0) {
             merged = merged.filter(chat => 
@@ -109,26 +82,61 @@ export default function ChatsListScreen() {
 
     useEffect(() => {
         if (!user) return;
-        let unsubs: (() => void)[] = [];
-        [...activeChats, ...archivedChats].forEach((chat) => {
-            const qMsgs = query(collection(db, "events", chat.id, "messages"), orderBy("createdAt", "desc"));
-            const unsub = onSnapshot(qMsgs, async (msgSnap) => {
-                const statusSnap = await getDoc(doc(db, "users", user.uid, "chatStatus", chat.id));
-                const lastRead = statusSnap.exists() ? statusSnap.data().lastRead : null;
-                let unread = false;
-                msgSnap.forEach((m) => {
-                    const data: any = m.data();
-                    if (!data.createdAt || data.userId === user.uid) return;
-                    const createdMs = data.createdAt.toMillis ? data.createdAt.toMillis() : new Date(data.createdAt).getTime();
-                    const lastReadMs = lastRead?.toMillis ? lastRead.toMillis() : lastRead ? new Date(lastRead).getTime() : 0;
-                    if (!lastRead || createdMs > lastReadMs) unread = true;
+        const allChats = (() => {
+            const map = new Map<string, EventChatItem>();
+            [...ownerEvents, ...acceptedEvents].forEach((ev) => map.set(ev.id, ev));
+            return Array.from(map.values()).filter(
+                ev => ev.userId === user.uid || ev.acceptedUserIds?.includes(user.uid)
+            );
+        })();
+
+        const unsubs: (() => void)[] = [];
+        const subscribedIds = new Set<string>();
+
+        allChats.forEach((chat) => {
+            if (subscribedIds.has(chat.id)) return;
+            subscribedIds.add(chat.id);
+
+            const messagesRef = collection(db, "events", chat.id, "messages");
+            const qMsgs = query(messagesRef, orderBy("createdAt", "desc"), limit(1));
+            const statusRef = doc(db, "users", user.uid, "chatStatus", chat.id);
+
+            let lastMsgData: any = null;
+            let lastReadMs = 0;
+            let msgLoaded = false;
+            let statusLoaded = false;
+
+            const recalcUnread = () => {
+                if (!msgLoaded || !statusLoaded) return;
+                const isUnread = lastMsgData && lastMsgData.userId !== user.uid && (() => {
+                    const createdMs = lastMsgData.createdAt?.toMillis?.() ?? new Date(lastMsgData.createdAt).getTime();
+                    return createdMs > lastReadMs;
+                })();
+                setUnreadByEvent(prev => {
+                    const next = !!isUnread;
+                    if (prev[chat.id] === next) return prev; // ← не оновлюємо стейт якщо не змінилось
+                    return { ...prev, [chat.id]: next };
                 });
-                setUnreadByEvent(prev => ({ ...prev, [chat.id]: unread }));
+            };
+
+            const unsubMsg = onSnapshot(qMsgs, (snap) => {
+                lastMsgData = snap.docs[0]?.data() ?? null;
+                msgLoaded = true;
+                recalcUnread();
             });
-            unsubs.push(unsub);
+
+            const unsubStatus = onSnapshot(statusRef, (snap) => {
+                lastReadMs = snap.exists() ? (snap.data().lastRead?.toMillis?.() ?? 0) : 0;
+                statusLoaded = true;
+                recalcUnread();
+            });
+
+            unsubs.push(unsubMsg, unsubStatus);
         });
+
         return () => unsubs.forEach(fn => fn());
-    }, [activeChats, archivedChats, user]);
+    }, [ownerEvents, acceptedEvents, user]);
+
 
     const openChat = (event: EventChatItem) => {
         if (Platform.OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -266,8 +274,6 @@ const styles = StyleSheet.create({
     headerTitle: { fontSize: 24, fontWeight: "800", color: COLORS.onSurface, letterSpacing: -0.5 },
     backBtn: { padding: 8, backgroundColor: COLORS.white, borderRadius: 12, elevation: 2 },
     headerIcon: { padding: 8 },
-    
-    // Search styles
     searchContainer: { flexDirection: 'row', alignItems: 'center', flex: 1 },
     searchInputWrapper: {
         flex: 1,
@@ -281,7 +287,6 @@ const styles = StyleSheet.create({
     searchInput: { flex: 1, fontSize: 16, color: COLORS.onSurface, paddingVertical: 0 },
     cancelBtn: { marginLeft: 12 },
     cancelText: { color: COLORS.primary, fontWeight: "600", fontSize: 16 },
-
     tabContainer: {
         flexDirection: 'row',
         backgroundColor: "rgba(0,0,0,0.05)",

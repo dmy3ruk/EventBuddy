@@ -1,36 +1,16 @@
 import React, {useEffect, useState} from "react";
-import {
-    View,
-    ScrollView,
-    Text,
-    TouchableOpacity,
-    TextInput,
-    StyleSheet,
-    Alert,
-    ActivityIndicator,
-    Platform,
+import { View, ScrollView, Text, TouchableOpacity, TextInput, StyleSheet, Alert, ActivityIndicator, Platform, Image,
 } from "react-native";
 import {MaterialCommunityIcons} from "@expo/vector-icons";
 import {SafeAreaView} from "react-native-safe-area-context";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from 'expo-haptics';
 import {getAuth} from "firebase/auth";
-import {
-    collection, query, where, getDocs, doc, getDoc, setDoc,
-    serverTimestamp, deleteDoc, addDoc
+import { collection, query, where, getDocs, doc, getDoc, setDoc, serverTimestamp, deleteDoc, addDoc, onSnapshot
 } from "firebase/firestore";
 import {db} from "../../FirebaseConfig";
+import {UserItem, FriendItem, FriendRequest, TabType} from "@/utils/types";
 
-type UserItem = { uid: string; username: string };
-type FriendItem = { uid: string; username: string };
-type FriendRequest = {
-    id: string;
-    fromUid: string;
-    fromUsername: string;
-    toUid: string;
-    toUsername: string;
-};
-type TabType = "Search" | "Requests" | "My friends";
 
 const COLORS = {
     primary: "#505BEB",
@@ -52,62 +32,52 @@ export default function FriendsScreen() {
     const [sentRequests, setSentRequests] = useState<string[]>([]);
     const [loading, setLoading] = useState(false);
     const [myUsername, setMyUsername] = useState<string>("");
+    const [myAvatarUrl, setMyAvatarUrl] = useState<string | null>(null); // Зберігаємо власну аватарку
 
     const auth = getAuth();
 
-    // FIX 3: використовуємо onAuthStateChanged замість auth.currentUser
     useEffect(() => {
-        const unsubscribe = auth.onAuthStateChanged(async (user) => {
+        let unsubscribeFriends: () => void = () => {};
+        let unsubscribeRequests: () => void = () => {};
+
+        const unsubscribeAuth = auth.onAuthStateChanged(async (user) => {
             if (!user) return;
 
+            // Завантажуємо свій профіль (нікнейм + аватарку)
             const docRef = doc(db, "users", user.uid);
             const docSnap = await getDoc(docRef);
-            if (docSnap.exists()) setMyUsername(docSnap.data().username);
+            if (docSnap.exists()) {
+                setMyUsername(docSnap.data().username);
+                setMyAvatarUrl(docSnap.data().avatarUrl || null);
+            }
+            const qReq = query(collection(db, "friendRequests"), where("toUid", "==", user.uid));
+            unsubscribeRequests = onSnapshot(qReq, (snapshot) => {
+                setIncomingRequests(snapshot.docs.map(d => ({id: d.id, ...d.data()} as FriendRequest)));
+            }, (err) => console.error("Requests listener error:", err));
+            const friendsRef = collection(db, "friends", user.uid, "list");
+            unsubscribeFriends = onSnapshot(friendsRef, (snapshot) => {
+                setMyFriends(snapshot.docs.map(d => ({
+                    uid: d.id,
+                    username: d.data().username,
+                    avatarUrl: d.data().avatarUrl || null
+                })));
+            }, (err) => console.error("Friends listener error:", err));
 
-            fetchIncomingRequests();
             fetchSentRequests();
-
-            if (activeTab === "My friends") fetchMyFriends();
         });
-        return () => unsubscribe();
+
+        return () => {
+            unsubscribeAuth();
+            unsubscribeRequests();
+            unsubscribeFriends();
+        };
     }, []);
 
-    // Оновлюємо дані при зміні вкладок
+    // Оновлюємо відправлені запити при перемиканні вкладок
     useEffect(() => {
-        if (activeTab === "My friends") fetchMyFriends();
-        else if (activeTab === "Requests") fetchIncomingRequests();
         fetchSentRequests();
     }, [activeTab]);
 
-    const fetchMyFriends = async () => {
-        const user = auth.currentUser;
-        if (!user) return;
-        try {
-            setLoading(true);
-            const snapshot = await getDocs(collection(db, "friends", user.uid, "list"));
-            setMyFriends(snapshot.docs.map(d => ({uid: d.id, username: d.data().username})));
-        } catch (e) {
-            console.error("fetchMyFriends error:", e);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const fetchIncomingRequests = async () => {
-        const user = auth.currentUser;
-        if (!user) return;
-        try {
-            const q = query(collection(db, "friendRequests"), where("toUid", "==", user.uid));
-            const snapshot = await getDocs(q);
-            setIncomingRequests(snapshot.docs.map(d => ({id: d.id, ...d.data()} as FriendRequest)));
-        } catch (e) {
-            console.error("fetchIncomingRequests error:", e);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    // FIX 1: додано try/catch — раніше тут міг бути unhandled promise rejection
     const fetchSentRequests = async () => {
         const user = auth.currentUser;
         if (!user) return;
@@ -137,8 +107,13 @@ export default function FriendsScreen() {
             );
             const snapshot = await getDocs(q);
             const currentUser = auth.currentUser;
+
             setSearchResults(snapshot.docs
-                .map(d => ({uid: d.id, username: d.data().username}))
+                .map(d => ({
+                    uid: d.id,
+                    username: d.data().username,
+                    avatarUrl: d.data().avatarUrl || null
+                }))
                 .filter(u => u.uid !== currentUser?.uid)
             );
         } catch (e) {
@@ -167,12 +142,12 @@ export default function FriendsScreen() {
             }
 
             setLoading(true);
-
             const requestId = `${user.uid}_${userToAdd.uid}`;
 
             await setDoc(doc(db, "friendRequests", requestId), {
                 fromUid: user.uid,
                 fromUsername: myUsername,
+                fromAvatarUrl: myAvatarUrl,
                 toUid: userToAdd.uid,
                 toUsername: userToAdd.username,
                 status: "pending",
@@ -194,15 +169,25 @@ export default function FriendsScreen() {
         if (!user || !myUsername) return;
         try {
             setLoading(true);
+
+            // Додаємо друга до свого списку (зберігаємо його аватарку)
             await setDoc(doc(db, "friends", user.uid, "list", req.fromUid), {
-                uid: req.fromUid, username: req.fromUsername, createdAt: serverTimestamp()
+                uid: req.fromUid,
+                username: req.fromUsername,
+                avatarUrl: req.fromAvatarUrl || null,
+                createdAt: serverTimestamp()
             });
+
+            // Додаємо себе до списку друга (передаємо свою аватарку)
             await setDoc(doc(db, "friends", req.fromUid, "list", user.uid), {
-                uid: user.uid, username: myUsername, createdAt: serverTimestamp()
+                uid: user.uid,
+                username: myUsername,
+                avatarUrl: myAvatarUrl || null,
+                createdAt: serverTimestamp()
             });
+
             await deleteDoc(doc(db, "friendRequests", req.id));
             setIncomingRequests(prev => prev.filter(r => r.id !== req.id));
-            fetchMyFriends();
         } catch (e) {
             console.error("handleAcceptRequest error:", e);
         } finally {
@@ -246,7 +231,6 @@ export default function FriendsScreen() {
 
     return (
         <SafeAreaView style={[styles.container, {backgroundColor: COLORS.surface}]} edges={['top']}>
-            {/* Header */}
             <View style={styles.header}>
                 <View>
                     <Text style={styles.welcomeText}>MANAGE YOUR</Text>
@@ -258,7 +242,6 @@ export default function FriendsScreen() {
                 </TouchableOpacity>
             </View>
 
-            {/* Search Bar */}
             <View style={styles.searchSection}>
                 <View style={styles.searchBar}>
                     <MaterialCommunityIcons name="magnify" size={22} color={COLORS.primary}/>
@@ -273,7 +256,6 @@ export default function FriendsScreen() {
                 </View>
             </View>
 
-            {/* Tabs with Badge */}
             <View style={styles.tabBar}>
                 {(["Requests", "My friends"] as TabType[]).map((tab) => {
                     const isActive = activeTab === tab;
@@ -302,14 +284,18 @@ export default function FriendsScreen() {
             <ScrollView contentContainerStyle={styles.listContainer} showsVerticalScrollIndicator={false}>
                 {loading && <ActivityIndicator color={COLORS.primary} style={{marginBottom: 15}}/>}
 
-                {/* Search Results */}
+                {/* Результати пошуку */}
                 {activeTab === "Search" && searchResults.map(user => {
                     const isFriend = myFriends.some(f => f.uid === user.uid);
                     const isSent = sentRequests.includes(user.uid);
                     return (
                         <View key={user.uid} style={styles.card}>
                             <View style={[styles.avatar, {backgroundColor: COLORS.primaryContainer}]}>
-                                <Text style={[styles.avatarText, {color: COLORS.primary}]}>{user.username[0].toUpperCase()}</Text>
+                                {user.avatarUrl ? (
+                                    <Image source={{uri: user.avatarUrl}} style={styles.avatarImage} />
+                                ) : (
+                                    <Text style={[styles.avatarText, {color: COLORS.primary}]}>{user.username[0].toUpperCase()}</Text>
+                                )}
                             </View>
                             <View style={styles.cardInfo}>
                                 <Text style={styles.cardName}>{user.username}</Text>
@@ -326,11 +312,15 @@ export default function FriendsScreen() {
                     );
                 })}
 
-                {/* Incoming Requests */}
+                {/* Запити на додавання в друзі */}
                 {activeTab === "Requests" && incomingRequests.map(req => (
                     <View key={req.id} style={styles.card}>
                         <View style={styles.avatar}>
-                            <Text style={styles.avatarText}>{req.fromUsername[0].toUpperCase()}</Text>
+                            {req.fromAvatarUrl ? (
+                                <Image source={{uri: req.fromAvatarUrl}} style={styles.avatarImage} />
+                            ) : (
+                                <Text style={styles.avatarText}>{req.fromUsername[0].toUpperCase()}</Text>
+                            )}
                         </View>
                         <View style={styles.cardInfo}>
                             <Text style={styles.cardName}>{req.fromUsername}</Text>
@@ -342,11 +332,15 @@ export default function FriendsScreen() {
                     </View>
                 ))}
 
-                {/* Friends List */}
+                {/* Друзі (список) */}
                 {activeTab === "My friends" && myFriends.map(friend => (
                     <View key={friend.uid} style={styles.card}>
                         <View style={[styles.avatar, {backgroundColor: COLORS.secondary}]}>
-                            <Text style={styles.avatarText}>{friend.username[0].toUpperCase()}</Text>
+                            {friend.avatarUrl ? (
+                                <Image source={{uri: friend.avatarUrl}} style={styles.avatarImage} />
+                            ) : (
+                                <Text style={styles.avatarText}>{friend.username[0].toUpperCase()}</Text>
+                            )}
                         </View>
                         <View style={styles.cardInfo}>
                             <Text style={styles.cardName}>{friend.username}</Text>
@@ -380,7 +374,8 @@ const styles = StyleSheet.create({
     requestBadge: {width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.error, marginLeft: 6, borderWidth: 1, borderColor: COLORS.white},
     listContainer: {paddingHorizontal: 20, paddingBottom: 40},
     card: {flexDirection: "row", alignItems: "center", backgroundColor: COLORS.white, borderRadius: 24, padding: 16, marginBottom: 12, elevation: 2, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 8, shadowOffset: {width: 0, height: 2}},
-    avatar: {width: 52, height: 52, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.primary},
+    avatar: {width: 52, height: 52, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.primary, overflow: "hidden"}, // Додано overflow: "hidden"
+    avatarImage: {width: "100%", height: "100%", borderRadius: 18}, // Стиль для самої картинки
     avatarText: {color: COLORS.white, fontSize: 20, fontWeight: "bold"},
     cardInfo: {flex: 1, marginLeft: 15},
     cardName: {fontSize: 17, fontWeight: "700", color: COLORS.onSurface},

@@ -83,6 +83,8 @@ export default function AchievementModal({
             visible={visible}
             animationType="fade"
             hardwareAccelerated
+            statusBarTranslucent
+            presentationStyle="overFullScreen"
             onRequestClose={onClose}
         >
             <View style={styles.overlay}>

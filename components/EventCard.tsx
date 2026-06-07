@@ -69,7 +69,7 @@ const getCategoryTheme = (category?: string) => {
   if (cat.includes("work & study")) return { primary: "#334882", bg: "#EFF6FF" };
   if (cat.includes("social")) return { primary: "#EC4899", bg: "#FDF2F8" };
   if (cat.includes("entertaiment")) return { primary: "#8B5CF6", bg: "#F5F3FF" };
-  if (cat.includes("health & self-care")) return { primary: "#76cdf3", bg: "#F0FDF4" };
+  if (cat.includes("health/self-care")) return { primary: "#76cdf3", bg: "#F0FDF4" };
   if (cat.includes("food & drinks")) return { primary: "#F59E0B", bg: "#FFFBEB" };
   if (cat.includes("sport")) return { primary: "#10B981", bg: "#F0FDF4" };
   if (cat.includes("other")) return { primary: "#94A3B8", bg: "#F8FAFC" };
@@ -97,8 +97,11 @@ export default function EventCard({
 
   const theme = getCategoryTheme(item.category);
 
-  const acceptedUserIds = Array.isArray(eventAny.acceptedUserIds)
-      ? eventAny.acceptedUserIds
+  // type-safe filter from v1
+  const acceptedUserIds: string[] = Array.isArray(eventAny.acceptedUserIds)
+      ? eventAny.acceptedUserIds.filter(
+          (id: unknown): id is string => typeof id === "string"
+      )
       : [];
 
   const invitedUserIds = Array.isArray(eventAny.invitedUserIds)
@@ -108,10 +111,23 @@ export default function EventCard({
   const isAccepted = acceptedUserIds.includes(uid);
   const isInvited = invitedUserIds.includes(uid) && !isAccepted;
 
+  const isPublic = item.isPublic;
+  const canLeave = isPublic && isAccepted && !isOwner;
+
+  const goingCount = Array.from(new Set([ownerId, ...acceptedUserIds])).filter(
+      (pUid): pUid is string =>
+          typeof pUid === "string" && pUid.trim().length > 0
+  ).length;
+
+  const hasLocation =
+      typeof item.location?.latitude === "number" &&
+      typeof item.location?.longitude === "number" &&
+      item.location.latitude !== 0 &&
+      item.location.longitude !== 0;
+
   useEffect(() => {
     const checkAdminStatus = async () => {
       if (!uid) return;
-
       try {
         const userDoc = await getDoc(doc(db, "users", uid));
         setIsAdmin(userDoc.exists() && userDoc.data().role === "admin");
@@ -141,9 +157,7 @@ export default function EventCard({
       const existing = await getDocs(reportsQuery);
 
       if (!existing.empty) {
-        const reportDoc = existing.docs[0];
-
-        await updateDoc(doc(db, "reports", reportDoc.id), {
+        await updateDoc(doc(db, "reports", existing.docs[0].id), {
           reasons: arrayUnion(reason),
           reporters: arrayUnion(uid),
           updatedAt: serverTimestamp(),
@@ -171,6 +185,7 @@ export default function EventCard({
         });
       }
 
+      // always hide from reporter (from v1)
       await updateDoc(doc(db, "events", item.id), {
         hiddenFor: arrayUnion(uid),
       });
@@ -201,6 +216,17 @@ export default function EventCard({
         },
       },
     ]);
+  };
+
+  const handleLeave = async () => {
+    try {
+      await updateDoc(doc(db, "events", item.id), {
+        acceptedUserIds: acceptedUserIds.filter((id) => id !== uid),
+      });
+      onJoinToggle?.(item.id);
+    } catch (e) {
+      Alert.alert("Error", "Failed to leave event");
+    }
   };
 
   const renderRightActions = (
@@ -237,20 +263,18 @@ export default function EventCard({
                 </Animated.View>
               </TouchableOpacity>
           )}
+
+          {canLeave && (
+              <TouchableOpacity onPress={handleLeave} style={styles.leaveSwipeContainer}>
+                <Animated.View style={{ transform: [{ scale }], alignItems: "center" }}>
+                  <Ionicons name="exit-outline" size={26} color="#fff" />
+                  <Text style={styles.swipeText}>LEAVE</Text>
+                </Animated.View>
+              </TouchableOpacity>
+          )}
         </View>
     );
   };
-
-  const hasLocation =
-      typeof item.location?.latitude === "number" &&
-      typeof item.location?.longitude === "number" &&
-      item.location.latitude !== 0 &&
-      item.location.longitude !== 0;
-
-  const goingCount = Array.from(new Set([ownerId, ...acceptedUserIds])).filter(
-      (pUid): pUid is string =>
-          typeof pUid === "string" && pUid.trim().length > 0
-  ).length;
 
   const CardContent = (
       <View style={[styles.card, { borderLeftColor: theme.primary }]}>
@@ -278,7 +302,6 @@ export default function EventCard({
                 size={12}
                 color={item.isPublic ? "#059669" : "#6366F1"}
             />
-
             <Text
                 style={[
                   styles.typeText,
@@ -292,12 +315,9 @@ export default function EventCard({
 
         <View style={styles.infoSection}>
           {item.details && (
-              <View>
-                <Text style={styles.infoTextDetails}>
-                  {item.details}
-                </Text>
-              </View>
+              <Text style={styles.infoTextDetails}>{item.details}</Text>
           )}
+
           <View style={styles.infoRow}>
             <Ionicons name="calendar-outline" size={24} color="#6E7D93" />
             <Text style={styles.infoText}>
@@ -314,10 +334,7 @@ export default function EventCard({
               >
                 <Ionicons name="location-outline" size={24} color={theme.primary} />
                 <Text
-                    style={[
-                      styles.infoText,
-                      { color: theme.primary, fontWeight: "700" },
-                    ]}
+                    style={[styles.infoText, { color: theme.primary, fontWeight: "700" }]}
                     numberOfLines={1}
                 >
                   {item.location?.name || "Somewhere"}
@@ -361,18 +378,12 @@ export default function EventCard({
         <View style={styles.divider} />
 
         <View style={styles.bottomRow}>
-          <View style={styles.participantRow}>
-            <Text style={styles.participantsCount}>{goingCount} going</Text>
-          </View>
+          <Text style={styles.participantsCount}>{goingCount} going</Text>
 
           <View style={styles.actionGroup}>
             {(isOwner || isAccepted || isAdmin) && onOpenChat && (
                 <TouchableOpacity style={styles.iconBtn} onPress={() => onOpenChat(item)}>
-                  <Ionicons
-                      name="chatbubble-ellipses-outline"
-                      size={22}
-                      color="#94A3B8"
-                  />
+                  <Ionicons name="chatbubble-ellipses-outline" size={22} color="#94A3B8" />
                 </TouchableOpacity>
             )}
           </View>
@@ -479,6 +490,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
+  leaveSwipeContainer: {
+    width: 80,
+    backgroundColor: "#3B82F6",
+    justifyContent: "center",
+    alignItems: "center",
+  },
   swipeText: {
     color: "#FFF",
     fontWeight: "800",
@@ -549,7 +566,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#6E7D93",
     fontWeight: "600",
-    marginBottom:4
+    marginBottom: 4,
   },
   divider: {
     height: 1,
@@ -560,11 +577,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-  },
-  participantRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
   },
   participantsCount: {
     fontSize: 12,

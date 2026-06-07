@@ -1,33 +1,15 @@
 import React, { useEffect, useMemo, useState } from "react";
-import {
-    View,
-    Text,
-    StyleSheet,
-    TouchableOpacity,
-    ScrollView,
-    Alert,
-    ActivityIndicator,
-    Image,
-    Switch,
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Image, Switch, Modal, TextInput,
 } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { getAuth } from "firebase/auth";
 import { router } from "expo-router";
 import { auth, db } from "../../FirebaseConfig";
 import { SafeAreaView } from "react-native-safe-area-context";
-import {
-    doc,
-    onSnapshot,
-    collection,
-    updateDoc,
-    getDoc,
+import { doc, onSnapshot, collection, updateDoc, getDoc, setDoc, deleteDoc, query, where, getDocs,
 } from "firebase/firestore";
 import * as ImagePicker from "expo-image-picker";
-
-import {
-    subscribeToOwnerEvents,
-    subscribeToInvitedEvents,
-    calculateProfileStats,
+import { subscribeToOwnerEvents, subscribeToInvitedEvents, calculateProfileStats,
 } from "../../utils/firestoreService";
 import { EventFull } from "../../utils/types";
 import { useNavigation } from "@react-navigation/native";
@@ -50,15 +32,17 @@ export default function ProfileScreen() {
     const [username, setUsername] = useState<string>("");
     const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
     const [uploading, setUploading] = useState(false);
-
+    const [isUsernameModalVisible, setIsUsernameModalVisible] = useState(false);
+    const [newUsername, setNewUsername] = useState("");
+    const [usernameError, setUsernameError] = useState("");
+    const [isCheckingUsername, setIsCheckingUsername] = useState(false);
+    const [savingUsername, setSavingUsername] = useState(false);
     const [ownerEvents, setOwnerEvents] = useState<EventFull[]>([]);
     const [invitedEvents, setInvitedEvents] = useState<EventFull[]>([]);
     const [upcomingCount, setUpcomingCount] = useState(0);
     const [totalAttendees, setTotalAttendees] = useState(0);
     const [friendsConected, setFriendsConected] = useState(0);
-
     const [isAdmin, setIsAdmin] = useState(false);
-
     const [eventNotifications, setEventNotifications] = useState(true);
     const [defaultPrivateEvent, setDefaultPrivateEvent] = useState(false);
     const [reminderMinutes, setReminderMinutes] = useState(60);
@@ -76,7 +60,6 @@ export default function ProfileScreen() {
             setCurrentUid(u.uid);
             setEmail(u.email);
         });
-
         return () => unsubscribeAuth();
     }, []);
 
@@ -143,6 +126,55 @@ export default function ProfileScreen() {
         setTotalAttendees(stats.totalAttendees);
     }, [ownerEvents, invitedEvents, currentUid]);
 
+    // Ефект дебаунсу для перевірки унікальності нікнейму
+    useEffect(() => {
+        if (!newUsername.trim()) {
+            setUsernameError("");
+            return;
+        }
+
+        const trimName = newUsername.trim();
+
+        // Якщо користувач ввів свій же поточний нікнейм — не сваримось
+        if (trimName.toLowerCase() === username.toLowerCase()) {
+            setUsernameError("");
+            return;
+        }
+
+        if (trimName.length < 2) {
+            setUsernameError("Minimum 2 characters");
+            return;
+        }
+
+        if (!/^[a-zA-Zа-яА-ЯіІїЇєЄ0-9_]+$/.test(trimName)) {
+            setUsernameError("Only letters, numbers, and _ allowed");
+            return;
+        }
+
+        const delayDebounceFn = setTimeout(async () => {
+            setIsCheckingUsername(true);
+            try {
+                const q = query(
+                    collection(db, "usernames"),
+                    where("usernameLower", "==", trimName.toLowerCase())
+                );
+                const snap = await getDocs(q);
+
+                if (!snap.empty) {
+                    setUsernameError("This username is already taken");
+                } else {
+                    setUsernameError("");
+                }
+            } catch (err) {
+                console.error("Error checking username:", err);
+            } finally {
+                setIsCheckingUsername(false);
+            }
+        }, 600);
+
+        return () => clearTimeout(delayDebounceFn);
+    }, [newUsername, username]);
+
     const allEvents = useMemo(() => {
         return [...ownerEvents, ...invitedEvents];
     }, [ownerEvents, invitedEvents]);
@@ -176,6 +208,99 @@ export default function ProfileScreen() {
                 : reminderMinutes === 60
                     ? "1 hour"
                     : "1 day";
+
+    const openEditUsername = () => {
+        setNewUsername(username);
+        setUsernameError("");
+        setIsUsernameModalVisible(true);
+    };
+
+    const handleSaveUsername = async () => {
+        if (!currentUid || usernameError || isCheckingUsername) return;
+
+        const finalName = newUsername.trim();
+        if (!finalName) {
+            setUsernameError("Username cannot be empty");
+            return;
+        }
+
+        if (finalName.toLowerCase() === username.toLowerCase()) {
+            setIsUsernameModalVisible(false);
+            return;
+        }
+
+        setSavingUsername(true);
+
+        try {
+            // 1. Займаємо новий нікнейм першим (якщо вже зайнятий — впадемо тут)
+            await setDoc(doc(db, "usernames", finalName.toLowerCase()), {
+                uid: currentUid,
+                usernameLower: finalName.toLowerCase(),
+            });
+
+            // 2. Оновлюємо документ користувача
+            await updateDoc(doc(db, "users", currentUid), {
+                username: finalName,
+                usernameLower: finalName.toLowerCase(),
+            });
+
+            // 3. Звільняємо старий нікнейм
+            if (username && username !== "No username") {
+                try {
+                    const oldRef = doc(db, "usernames", username.toLowerCase());
+                    const oldSnap = await getDoc(oldRef);
+                    if (oldSnap.exists() && oldSnap.data().uid === currentUid) {
+                        await deleteDoc(oldRef);
+                    }
+                } catch (err) {
+                    console.warn("Could not delete old username doc:", err);
+                }
+            }
+
+            // 4. Оновлюємо нікнейм у списках друзів
+            try {
+                const friendsSnap = await getDocs(
+                    collection(db, "friends", currentUid, "list")
+                );
+                const friendUpdates = friendsSnap.docs.map((friendDoc) =>
+                    updateDoc(
+                        doc(db, "friends", friendDoc.id, "list", currentUid),
+                        { username: finalName }
+                    )
+                );
+                await Promise.all(friendUpdates);
+            } catch (err) {
+                console.warn("Could not update username in friends lists:", err);
+            }
+
+            // 5. Оновлюємо нікнейм у відправлених запитах дружби
+            try {
+                const sentSnap = await getDocs(
+                    query(
+                        collection(db, "friendRequests"),
+                        where("fromUid", "==", currentUid)
+                    )
+                );
+                const sentUpdates = sentSnap.docs.map((d) =>
+                    updateDoc(doc(db, "friendRequests", d.id), {
+                        fromUsername: finalName,
+                    })
+                );
+                await Promise.all(sentUpdates);
+            } catch (err) {
+                console.warn("Could not update pending requests:", err);
+            }
+
+            setUsername(finalName);
+            setIsUsernameModalVisible(false);
+            Alert.alert("Success", "Username updated successfully!");
+        } catch (error: any) {
+            console.error("Save username error:", error);
+            Alert.alert("Error", "Failed to update username: " + error.message);
+        } finally {
+            setSavingUsername(false);
+        }
+    };
 
     const updateSetting = async (
         key: "eventNotifications" | "defaultPrivateEvent" | "autoJoinChat",
@@ -230,22 +355,10 @@ export default function ProfileScreen() {
             "Reminder time",
             "Choose when you want to be reminded",
             [
-                {
-                    text: "1 minute",
-                    onPress: () => saveReminderTime(1),
-                },
-                {
-                    text: "1 hour",
-                    onPress: () => saveReminderTime(60),
-                },
-                {
-                    text: "1 day",
-                    onPress: () => saveReminderTime(1440),
-                },
-                {
-                    text: "Cancel",
-                    style: "cancel",
-                },
+                { text: "1 minute", onPress: () => saveReminderTime(1) },
+                { text: "1 hour", onPress: () => saveReminderTime(60) },
+                { text: "1 day", onPress: () => saveReminderTime(1440) },
+                { text: "Cancel", style: "cancel" },
             ]
         );
     };
@@ -273,18 +386,63 @@ export default function ProfileScreen() {
     const handleUpload = async (uri: string) => {
         if (!currentUid) return;
 
+        // Беремо твої змінні оточення (перевір, щоб назви в .env збігалися)
+        const CLOUDINARY_CLOUD_NAME = process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME;
+        const CLOUDINARY_UPLOAD_PRESET = process.env.EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
+
+        if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET) {
+            Alert.alert("Error", "Cloudinary env variables are missing in ProfileScreen");
+            return;
+        }
+
         setUploading(true);
 
         try {
-            const cloudinaryUrl = uri;
+            // Створюємо FormData для відправки бінарного файлу в Cloudinary
+            const data = new FormData();
+            data.append("file", {
+                uri: uri,
+                name: `avatar_${currentUid}.jpg`,
+                type: "image/jpeg",
+            } as any);
+            data.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
 
+            console.log("⏳ [Profile] Uploading image to Cloudinary...");
+
+            // Робимо fetch-запит до Cloudinary API
+            const res = await fetch(
+                `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`,
+                {
+                    method: "POST",
+                    body: data,
+                }
+            );
+
+            const json = await res.json();
+
+            if (!res.ok) {
+                console.error("🔴 Cloudinary profile upload error:", json);
+                Alert.alert("Error", "Failed to upload image to Cloudinary");
+                return;
+            }
+
+            // Оптимізуємо посилання під аватарку (авто-формат, авто-якість, розмір 400х400 з обрізкою по центру)
+            const secureUrl = json.secure_url.replace(
+                "/upload/",
+                "/upload/f_auto,q_auto,w_400,h_400,c_fill/"
+            );
+
+            console.log("🍏 [Profile] Cloudinary URL received:", secureUrl);
+
+            // ЗБЕРІГАЄМО САМЕ ЦЕ HTTPS ПОСИЛАННЯ В FIRESTORE
             await updateDoc(doc(db, "users", currentUid), {
-                avatarUrl: cloudinaryUrl,
+                avatarUrl: secureUrl,
             });
 
-            setAvatarUrl(cloudinaryUrl);
+            setAvatarUrl(secureUrl);
+            Alert.alert("Success", "Avatar updated successfully!");
         } catch (error) {
-            console.error("Upload error:", error);
+            console.error("🔴 Profile upload handler error:", error);
             Alert.alert("Error", "Failed to upload avatar");
         } finally {
             setUploading(false);
@@ -337,7 +495,11 @@ export default function ProfileScreen() {
                         </TouchableOpacity>
                     </View>
 
-                    <Text style={styles.nameText}>{username}</Text>
+                    {/* Тепер клік на ім'я теж відкриває редагування */}
+                    <TouchableOpacity style={styles.usernameRow} onPress={openEditUsername}>
+                        <Text style={styles.nameText}>{username}</Text>
+                        <Ionicons name="create-outline" size={18} color={COLORS.outline} style={{ marginLeft: 6 }} />
+                    </TouchableOpacity>
 
                     <Text style={styles.emailText}>{email}</Text>
 
@@ -383,26 +545,13 @@ export default function ProfileScreen() {
                 {badges.length > 0 && (
                     <>
                         <SectionTitle title="Badges" />
-
                         <View style={styles.badgesRow}>
                             {badges.map((badge) => (
                                 <View key={badge.title} style={styles.badgeCard}>
-                                    <View
-                                        style={[
-                                            styles.badgeIcon,
-                                            { backgroundColor: badge.color + "18" },
-                                        ]}
-                                    >
-                                        <MaterialCommunityIcons
-                                            name={badge.icon as any}
-                                            size={22}
-                                            color={badge.color}
-                                        />
+                                    <View style={[styles.badgeIcon, { backgroundColor: badge.color + "18" }]}>
+                                        <MaterialCommunityIcons name={badge.icon as any} size={22} color={badge.color} />
                                     </View>
-
-                                    <Text style={styles.badgeText}>
-                                        {badge.title}
-                                    </Text>
+                                    <Text style={styles.badgeText}>{badge.title}</Text>
                                 </View>
                             ))}
                         </View>
@@ -417,63 +566,38 @@ export default function ProfileScreen() {
                         title="Event reminders"
                         subtitle="Receive reminders before upcoming events"
                         value={eventNotifications}
-                        onValueChange={(value) =>
-                            updateSetting("eventNotifications", value)
-                        }
+                        onValueChange={(value) => updateSetting("eventNotifications", value)}
                     />
 
                     <View style={styles.divider} />
 
                     <TouchableOpacity
                         style={styles.settingsLink}
-                        onPress={() =>
-                            updateSetting("defaultPrivateEvent", !defaultPrivateEvent)
-                        }
+                        onPress={() => updateSetting("defaultPrivateEvent", !defaultPrivateEvent)}
                     >
                         <View style={styles.settingIconBox}>
-                            <Ionicons
-                                name="lock-closed-outline"
-                                size={20}
-                                color={COLORS.primary}
-                            />
+                            <Ionicons name="lock-closed-outline" size={20} color={COLORS.primary} />
                         </View>
-
                         <View style={{ flex: 1 }}>
                             <Text style={styles.settingTitle}>Default event type</Text>
                             <Text style={styles.settingSubtitle}>
-                                {defaultPrivateEvent
-                                    ? "Private events by default"
-                                    : "Public events by default"}
+                                {defaultPrivateEvent ? "Private events by default" : "Public events by default"}
                             </Text>
                         </View>
-
-                        <Text style={styles.settingValue}>
-                            {defaultPrivateEvent ? "Private" : "Public"}
-                        </Text>
+                        <Text style={styles.settingValue}>{defaultPrivateEvent ? "Private" : "Public"}</Text>
                     </TouchableOpacity>
 
                     <View style={styles.divider} />
 
-                    <TouchableOpacity
-                        style={styles.settingsLink}
-                        onPress={changeReminderTime}
-                    >
+                    <TouchableOpacity style={styles.settingsLink} onPress={changeReminderTime}>
                         <View style={styles.settingIconBox}>
                             <Ionicons name="time-outline" size={20} color={COLORS.primary} />
                         </View>
-
                         <View style={{ flex: 1 }}>
                             <Text style={styles.settingTitle}>Reminder time</Text>
-                            <Text style={styles.settingSubtitle}>
-                                Notify me {reminderTimeLabel} before event
-                            </Text>
+                            <Text style={styles.settingSubtitle}>Notify me {reminderTimeLabel} before event</Text>
                         </View>
-
-                        <Ionicons
-                            name="chevron-forward"
-                            size={20}
-                            color={COLORS.outline}
-                        />
+                        <Ionicons name="chevron-forward" size={20} color={COLORS.outline} />
                     </TouchableOpacity>
 
                     <View style={styles.divider} />
@@ -488,14 +612,67 @@ export default function ProfileScreen() {
                 </View>
 
                 {isAdmin && (
-                    <TouchableOpacity
-                        style={styles.button}
-                        onPress={() => navigation.navigate("Admin")}
-                    >
+                    <TouchableOpacity style={styles.button} onPress={() => navigation.navigate("Admin")}>
                         <Text style={styles.text}>Admin Panel</Text>
                     </TouchableOpacity>
                 )}
             </ScrollView>
+
+            {/* --- СУЧАСНИЙ МОДАЛ ДЛЯ ЗМІНИ ЮЗЕРНЕЙМУ --- */}
+            <Modal visible={isUsernameModalVisible} transparent animationType="fade">
+                <View style={styles.modalBackdrop}>
+                    <View style={styles.modalContainer}>
+                        <Text style={styles.modalTitle}>Edit Username</Text>
+
+                        <View style={styles.modalInputWrapper}>
+                            <TextInput
+                                style={[styles.modalInput, usernameError ? styles.modalInputError : null]}
+                                value={newUsername}
+                                onChangeText={setNewUsername}
+                                placeholder="Enter username..."
+                                placeholderTextColor="#94A3B8"
+                                autoCapitalize="none"
+                                autoCorrect={false}
+                                maxLength={25}
+                            />
+                            {isCheckingUsername && (
+                                <ActivityIndicator style={styles.modalInputLoader} color={COLORS.primary} size="small" />
+                            )}
+                        </View>
+
+                        {usernameError ? (
+                            <Text style={styles.modalErrorText}>{usernameError}</Text>
+                        ) : (
+                            <Text style={styles.modalHintText}>Only letters, numbers, and _ are allowed.</Text>
+                        )}
+
+                        <View style={styles.modalActions}>
+                            <TouchableOpacity
+                                style={styles.modalCancelBtn}
+                                onPress={() => setIsUsernameModalVisible(false)}
+                                disabled={savingUsername}
+                            >
+                                <Text style={styles.modalCancelBtnText}>Cancel</Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                style={[
+                                    styles.modalSaveBtn,
+                                    (!!usernameError || isCheckingUsername || savingUsername) && { opacity: 0.5 }
+                                ]}
+                                onPress={handleSaveUsername}
+                                disabled={!!usernameError || isCheckingUsername || savingUsername}
+                            >
+                                {savingUsername ? (
+                                    <ActivityIndicator color="#fff" size="small" />
+                                ) : (
+                                    <Text style={styles.modalSaveBtnText}>Save</Text>
+                                )}
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
         </SafeAreaView>
     );
 }
@@ -509,7 +686,6 @@ const StatCard = ({ label, value, icon, color }: any) => (
         <View style={[styles.iconCircle, { backgroundColor: color + "15" }]}>
             <MaterialCommunityIcons name={icon} size={24} color={color} />
         </View>
-
         <Text style={styles.statValue}>{value}</Text>
         <Text style={styles.statLabel}>{label}</Text>
     </View>
@@ -532,12 +708,10 @@ const SettingRow = ({
         <View style={styles.settingIconBox}>
             <Ionicons name={icon} size={20} color={COLORS.primary} />
         </View>
-
         <View style={{ flex: 1 }}>
             <Text style={styles.settingTitle}>{title}</Text>
             <Text style={styles.settingSubtitle}>{subtitle}</Text>
         </View>
-
         <Switch
             value={value}
             onValueChange={onValueChange}
@@ -548,14 +722,8 @@ const SettingRow = ({
 );
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: COLORS.surface,
-    },
-    scrollContent: {
-        paddingBottom: 40,
-        paddingHorizontal: 20,
-    },
+    container: { flex: 1, backgroundColor: COLORS.surface },
+    scrollContent: { paddingBottom: 40, paddingHorizontal: 20 },
     topActions: {
         flexDirection: "row",
         justifyContent: "space-between",
@@ -563,11 +731,7 @@ const styles = StyleSheet.create({
         marginTop: 20,
         marginBottom: 20,
     },
-    topTitle: {
-        fontSize: 28,
-        fontWeight: "900",
-        color: COLORS.onSurface,
-    },
+    topTitle: { fontSize: 28, fontWeight: "900", color: COLORS.onSurface },
     logoutBtn: {
         padding: 10,
         backgroundColor: COLORS.white,
@@ -601,16 +765,8 @@ const styles = StyleSheet.create({
         justifyContent: "center",
         alignItems: "center",
     },
-    avatarImage: {
-        width: "100%",
-        height: "100%",
-        borderRadius: 52,
-    },
-    avatarText: {
-        fontSize: 40,
-        fontWeight: "bold",
-        color: COLORS.white,
-    },
+    avatarImage: { width: "100%", height: "100%", borderRadius: 52 },
+    avatarText: { fontSize: 40, fontWeight: "bold", color: COLORS.white },
     editIcon: {
         position: "absolute",
         bottom: -2,
@@ -625,16 +781,14 @@ const styles = StyleSheet.create({
         borderWidth: 2,
         borderColor: "#fff",
     },
-    nameText: {
-        fontSize: 22,
-        fontWeight: "800",
-        color: COLORS.onSurface,
+    usernameRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        paddingVertical: 4,
     },
-    emailText: {
-        fontSize: 13,
-        color: COLORS.outline,
-        marginTop: 4,
-    },
+    nameText: { fontSize: 22, fontWeight: "800", color: COLORS.onSurface },
+    emailText: { fontSize: 13, color: COLORS.outline, marginTop: 4 },
     bioBox: {
         marginTop: 14,
         backgroundColor: COLORS.primaryContainer,
@@ -642,19 +796,9 @@ const styles = StyleSheet.create({
         paddingHorizontal: 14,
         borderRadius: 18,
     },
-    bioText: {
-        fontSize: 13,
-        color: COLORS.primary,
-        fontWeight: "600",
-        textAlign: "center",
-    },
-    statsContainer: {
-        gap: 12,
-    },
-    statsRow: {
-        flexDirection: "row",
-        gap: 12,
-    },
+    bioText: { fontSize: 13, color: COLORS.primary, fontWeight: "600", textAlign: "center" },
+    statsContainer: { gap: 12 },
+    statsRow: { flexDirection: "row", gap: 12 },
     statCard: {
         flex: 1,
         backgroundColor: COLORS.white,
@@ -666,30 +810,11 @@ const styles = StyleSheet.create({
         shadowRadius: 8,
         alignItems: "center",
     },
-    iconCircle: {
-        padding: 10,
-        borderRadius: 16,
-        marginBottom: 8,
-    },
-    statValue: {
-        fontSize: 22,
-        fontWeight: "900",
-    },
-    statLabel: {
-        fontSize: 12,
-        color: COLORS.outline,
-    },
-    sectionTitle: {
-        fontSize: 18,
-        fontWeight: "800",
-        color: COLORS.onSurface,
-        marginTop: 24,
-        marginBottom: 12,
-    },
-    badgesRow: {
-        flexDirection: "row",
-        gap: 10,
-    },
+    iconCircle: { padding: 10, borderRadius: 16, marginBottom: 8 },
+    statValue: { fontSize: 22, fontWeight: "900" },
+    statLabel: { fontSize: 12, color: COLORS.outline },
+    sectionTitle: { fontSize: 18, fontWeight: "800", color: COLORS.onSurface, marginTop: 24, marginBottom: 12 },
+    badgesRow: { flexDirection: "row", gap: 10 },
     badgeCard: {
         flex: 1,
         backgroundColor: COLORS.white,
@@ -701,19 +826,8 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.04,
         shadowRadius: 6,
     },
-    badgeIcon: {
-        width: 42,
-        height: 42,
-        borderRadius: 16,
-        justifyContent: "center",
-        alignItems: "center",
-        marginBottom: 8,
-    },
-    badgeText: {
-        fontSize: 12,
-        fontWeight: "700",
-        color: COLORS.onSurface,
-    },
+    badgeIcon: { width: 42, height: 42, borderRadius: 16, justifyContent: "center", alignItems: "center", marginBottom: 8 },
+    badgeText: { fontSize: 12, fontWeight: "700", color: COLORS.onSurface },
     settingsCard: {
         backgroundColor: COLORS.white,
         borderRadius: 24,
@@ -724,16 +838,8 @@ const styles = StyleSheet.create({
         shadowRadius: 6,
         marginBottom: 96,
     },
-    settingRow: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 12,
-    },
-    settingsLink: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 12,
-    },
+    settingRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+    settingsLink: { flexDirection: "row", alignItems: "center", gap: 12 },
     settingIconBox: {
         width: 40,
         height: 40,
@@ -742,26 +848,10 @@ const styles = StyleSheet.create({
         justifyContent: "center",
         alignItems: "center",
     },
-    settingTitle: {
-        fontSize: 14,
-        fontWeight: "800",
-        color: COLORS.onSurface,
-    },
-    settingSubtitle: {
-        fontSize: 12,
-        color: COLORS.outline,
-        marginTop: 2,
-    },
-    settingValue: {
-        fontSize: 13,
-        fontWeight: "800",
-        color: COLORS.primary,
-    },
-    divider: {
-        height: 1,
-        backgroundColor: "#E2E8F0",
-        marginVertical: 14,
-    },
+    settingTitle: { fontSize: 14, fontWeight: "800", color: COLORS.onSurface },
+    settingSubtitle: { fontSize: 12, color: COLORS.outline, marginTop: 2 },
+    settingValue: { fontSize: 13, fontWeight: "800", color: COLORS.primary },
+    divider: { height: 1, backgroundColor: "#E2E8F0", marginVertical: 14 },
     button: {
         backgroundColor: "#007bff",
         paddingVertical: 12,
@@ -770,9 +860,95 @@ const styles = StyleSheet.create({
         alignItems: "center",
         marginTop: 24,
     },
-    text: {
-        color: "#fff",
+    text: { color: "#fff", fontSize: 16, fontWeight: "600" },
+
+    // СТИЛІ ДЛЯ МОДАЛУ РЕДАГУВАННЯ ЮЗЕРНЕЙМУ
+    modalBackdrop: {
+        flex: 1,
+        backgroundColor: "rgba(0, 0, 0, 0.4)",
+        justifyContent: "center",
+        alignItems: "center",
+        padding: 24,
+    },
+    modalContainer: {
+        width: "100%",
+        backgroundColor: COLORS.white,
+        borderRadius: 24,
+        padding: 24,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.15,
+        shadowRadius: 16,
+        elevation: 6,
+    },
+    modalTitle: {
+        fontSize: 20,
+        fontWeight: "800",
+        color: COLORS.onSurface,
+        marginBottom: 16,
+    },
+    modalInputWrapper: {
+        position: "relative",
+        justifyContent: "center",
+    },
+    modalInput: {
+        height: 52,
+        borderWidth: 1,
+        borderColor: "#E2E8F0",
+        backgroundColor: "#F8FAFC",
+        borderRadius: 14,
+        paddingHorizontal: 16,
         fontSize: 16,
-        fontWeight: "600",
+        color: COLORS.onSurface,
+    },
+    modalInputError: {
+        borderColor: COLORS.error,
+        backgroundColor: "#FEF2F2",
+    },
+    modalInputLoader: {
+        position: "absolute",
+        right: 16,
+    },
+    modalErrorText: {
+        fontSize: 13,
+        color: COLORS.error,
+        fontWeight: "500",
+        marginTop: 6,
+    },
+    modalHintText: {
+        fontSize: 12,
+        color: COLORS.outline,
+        marginTop: 6,
+    },
+    modalActions: {
+        flexDirection: "row",
+        gap: 12,
+        marginTop: 24,
+    },
+    modalCancelBtn: {
+        flex: 1,
+        height: 50,
+        borderRadius: 14,
+        justifyContent: "center",
+        alignItems: "center",
+        backgroundColor: "#F1F5F9",
+    },
+    modalCancelBtnText: {
+        fontSize: 15,
+        fontWeight: "700",
+        color: COLORS.outline,
+    },
+    modalSaveBtn: {
+        flex: 1,
+        height: 50,
+        borderRadius: 14,
+        justifyContent: "center",
+        alignItems: "center",
+        backgroundColor: COLORS.primary,
+    },
+    modalSaveBtnText: {
+        fontSize: 15,
+        fontWeight: "700",
+        color: COLORS.white,
     },
 });

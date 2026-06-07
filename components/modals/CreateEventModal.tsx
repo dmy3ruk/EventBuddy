@@ -12,7 +12,12 @@ import {
   Animated,
 } from "react-native";
 import { getAuth } from "firebase/auth";
-import { collection, getDocs } from "firebase/firestore";
+import {
+  collection,
+  getDocs,
+  query,
+  where,
+} from "firebase/firestore";
 import { db } from "../../FirebaseConfig";
 import { createEventWithChat } from "../../utils/createEventWithChat";
 import CategoryModal from "./CategoryModal";
@@ -20,19 +25,20 @@ import MapModal from "./MapModal";
 import { EventLocation } from "../../utils/types";
 import { EVENT_CATEGORIES } from "../../utils/categories";
 import * as Haptics from "expo-haptics";
-import DateTimePicker, {DateTimePickerEvent} from "@react-native-community/datetimepicker";
-import type { Event } from "@react-native-community/datetimepicker";
+import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 
 interface CreateEventModalProps {
   visible: boolean;
   closeModal: () => void;
   initialDate?: string;
+  onFirstEventCreated?: () => void;
 }
 
 export default function CreateEventModal({
                                            visible,
                                            closeModal,
                                            initialDate,
+                                           onFirstEventCreated,
                                          }: CreateEventModalProps) {
   const [loading, setLoading] = useState(false);
   const [eventType, setEventType] = useState<"public" | "private">("public");
@@ -125,7 +131,7 @@ export default function CreateEventModal({
     setPickerMode(mode);
   };
 
-  const onPickerChange = (event: Event, selected?: Date) => {
+  const onPickerChange = (event: any, selected?: Date) => {
     const now = Date.now();
 
     if (Platform.OS === "ios") {
@@ -141,7 +147,6 @@ export default function CreateEventModal({
           setTime(selected);
         }
       }
-
       setPickerMode(null);
     }
   };
@@ -152,7 +157,6 @@ export default function CreateEventModal({
     } else if (pickerMode === "time") {
       setTime(tempDate);
     }
-
     setPickerMode(null);
   };
 
@@ -169,6 +173,7 @@ export default function CreateEventModal({
       return;
     }
 
+    // ✅ Будуємо combined Date з локальних date/time об'єктів
     const combined = new Date(
         date.getFullYear(),
         date.getMonth(),
@@ -185,14 +190,23 @@ export default function CreateEventModal({
     setLoading(true);
 
     try {
+      const existingEvents = await getDocs(
+          query(
+              collection(db, "events"),
+              where("organizerId", "==", user.uid)
+          )
+      );
+
+      const isFirstEvent = existingEvents.size === 0;
+
+      // ✅ Гарантовано правильний формат "HH:MM" без залежності від локалі
+      const timeString = `${String(time.getHours()).padStart(2, "0")}:${String(time.getMinutes()).padStart(2, "0")}`;
+
       await createEventWithChat({
         name: name.trim(),
         date: date.toISOString().split("T")[0],
-        time: time.toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-          hour12: false,
-        }),
+        time: timeString,
+        eventDateTime: combined, // ✅ передаємо готовий Date
         details: details.trim(),
         category: selectedCategory,
         invitedUserIds: eventType === "private" ? selectedFriendIds : [],
@@ -210,6 +224,12 @@ export default function CreateEventModal({
       }
 
       handleAnimatedClose();
+
+      if (isFirstEvent) {
+        setTimeout(() => {
+          onFirstEventCreated?.();
+        }, 400);
+      }
     } catch (e) {
       console.error("Detailed Save Error:", e);
       Alert.alert(
@@ -252,7 +272,6 @@ export default function CreateEventModal({
           >
             <View style={styles.headerRow}>
               <Text style={styles.title}>Create Event</Text>
-
               <TouchableOpacity onPress={handleAnimatedClose}>
                 <Text style={styles.closeIcon}>✕</Text>
               </TouchableOpacity>
@@ -260,35 +279,19 @@ export default function CreateEventModal({
 
             <View style={styles.toggleRow}>
               <TouchableOpacity
-                  style={[
-                    styles.toggleBtn,
-                    eventType === "public" && styles.toggleBtnActive,
-                  ]}
+                  style={[styles.toggleBtn, eventType === "public" && styles.toggleBtnActive]}
                   onPress={() => setEventType("public")}
               >
-                <Text
-                    style={[
-                      styles.toggleText,
-                      eventType === "public" && styles.toggleTextActive,
-                    ]}
-                >
+                <Text style={[styles.toggleText, eventType === "public" && styles.toggleTextActive]}>
                   🌐 Public
                 </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                  style={[
-                    styles.toggleBtn,
-                    eventType === "private" && styles.toggleBtnActive,
-                  ]}
+                  style={[styles.toggleBtn, eventType === "private" && styles.toggleBtnActive]}
                   onPress={() => setEventType("private")}
               >
-                <Text
-                    style={[
-                      styles.toggleText,
-                      eventType === "private" && styles.toggleTextActive,
-                    ]}
-                >
+                <Text style={[styles.toggleText, eventType === "private" && styles.toggleTextActive]}>
                   🔒 Private
                 </Text>
               </TouchableOpacity>
@@ -341,22 +344,17 @@ export default function CreateEventModal({
                           <TouchableOpacity onPress={() => setPickerMode(null)}>
                             <Text style={{ color: "red" }}>Cancel</Text>
                           </TouchableOpacity>
-
                           <TouchableOpacity onPress={confirmIosPicker}>
-                            <Text style={{ color: "#505BEB", fontWeight: "700" }}>
-                              Done
-                            </Text>
+                            <Text style={{ color: "#505BEB", fontWeight: "700" }}>Done</Text>
                           </TouchableOpacity>
                         </View>
                     )}
-
                     <DateTimePicker
                         value={tempDate}
                         mode={pickerMode}
                         display={Platform.OS === "ios" ? "spinner" : "default"}
                         onChange={onPickerChange}
                         themeVariant="light"
-
                     />
                   </View>
               )}
@@ -387,15 +385,13 @@ export default function CreateEventModal({
                         value={friendsSearch}
                         onChangeText={setFriendsSearch}
                     />
-
                     <View style={styles.friendBox}>
                       {filteredFriends.map((f) => (
                           <TouchableOpacity
                               key={f.uid}
                               style={[
                                 styles.friendRow,
-                                selectedFriendIds.includes(f.uid) &&
-                                styles.friendSelected,
+                                selectedFriendIds.includes(f.uid) && styles.friendSelected,
                               ]}
                               onPress={() =>
                                   setSelectedFriendIds((prev) =>
@@ -415,13 +411,9 @@ export default function CreateEventModal({
             </ScrollView>
 
             <View style={styles.actions}>
-              <TouchableOpacity
-                  style={styles.cancelBtn}
-                  onPress={handleAnimatedClose}
-              >
+              <TouchableOpacity style={styles.cancelBtn} onPress={handleAnimatedClose}>
                 <Text>Cancel</Text>
               </TouchableOpacity>
-
               <TouchableOpacity
                   style={styles.createBtn}
                   onPress={handleSave}
@@ -457,146 +449,28 @@ export default function CreateEventModal({
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    justifyContent: "center",
-    padding: 15,
-  },
-  container: {
-    backgroundColor: "#fff",
-    borderRadius: 30,
-    padding: 20,
-    maxHeight: "85%",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.2,
-    shadowRadius: 15,
-    elevation: 20,
-  },
-  headerRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 15,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: "800",
-    color: "#1A1A1A",
-  },
-  closeIcon: {
-    fontSize: 20,
-    color: "#94A3B8",
-    padding: 5,
-  },
-  toggleRow: {
-    flexDirection: "row",
-    backgroundColor: "#F1F5F9",
-    borderRadius: 14,
-    padding: 4,
-    marginBottom: 15,
-  },
-  toggleBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    alignItems: "center",
-    borderRadius: 11,
-  },
-  toggleBtnActive: {
-    backgroundColor: "#fff",
-    elevation: 2,
-  },
-  toggleText: {
-    fontWeight: "700",
-    color: "#64748B",
-    fontSize: 13,
-  },
-  toggleTextActive: {
-    color: "#505BEB",
-  },
-  label: {
-    fontSize: 11,
-    fontWeight: "800",
-    color: "#505BEB",
-    marginTop: 12,
-    marginBottom: 6,
-    textTransform: "uppercase",
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-    borderRadius: 14,
-    padding: 12,
-    backgroundColor: "#F8FAFC",
-  },
-  textArea: {
-    height: 80,
-    textAlignVertical: "top",
-  },
-  row: {
-    flexDirection: "row",
-    gap: 10,
-  },
-  half: {
-    flex: 1,
-    justifyContent: "center",
-  },
-  selectInput: {
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-    borderRadius: 14,
-    padding: 14,
-    backgroundColor: "#F8FAFC",
-  },
-  friendBox: {
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-    borderRadius: 14,
-    maxHeight: 150,
-    marginTop: 8,
-  },
-  friendRow: {
-    flexDirection: "row",
-    padding: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F1F5F9",
-    alignItems: "center",
-  },
-  friendSelected: {
-    backgroundColor: "#F0F2FF",
-  },
-  actions: {
-    flexDirection: "row",
-    gap: 12,
-    marginTop: 25,
-  },
-  cancelBtn: {
-    flex: 1,
-    padding: 16,
-    alignItems: "center",
-    borderRadius: 16,
-    backgroundColor: "#F8FAFC",
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-  },
-  createBtn: {
-    flex: 1.5,
-    padding: 16,
-    alignItems: "center",
-    borderRadius: 16,
-    backgroundColor: "#505BEB",
-  },
-  pickerWrapper: {
-    backgroundColor: "#F1F5F9",
-    borderRadius: 16,
-    marginTop: 10,
-    overflow: "hidden",
-  },
-  iosToolbar: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    padding: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: "#E2E8F0",
-    backgroundColor: "#FFF",
-  },
+  backdrop: { flex: 1, justifyContent: "center", padding: 15 },
+  container: { backgroundColor: "#fff", borderRadius: 30, padding: 20, maxHeight: "85%", shadowColor: "#000", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.2, shadowRadius: 15, elevation: 20 },
+  headerRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 15 },
+  title: { fontSize: 22, fontWeight: "800", color: "#1A1A1A" },
+  closeIcon: { fontSize: 20, color: "#94A3B8", padding: 5 },
+  toggleRow: { flexDirection: "row", backgroundColor: "#F1F5F9", borderRadius: 14, padding: 4, marginBottom: 15 },
+  toggleBtn: { flex: 1, paddingVertical: 10, alignItems: "center", borderRadius: 11 },
+  toggleBtnActive: { backgroundColor: "#fff", elevation: 2 },
+  toggleText: { fontWeight: "700", color: "#64748B", fontSize: 13 },
+  toggleTextActive: { color: "#505BEB" },
+  label: { fontSize: 11, fontWeight: "800", color: "#505BEB", marginTop: 12, marginBottom: 6, textTransform: "uppercase" },
+  input: { borderWidth: 1, borderColor: "#E2E8F0", borderRadius: 14, padding: 12, backgroundColor: "#F8FAFC" },
+  textArea: { height: 80, textAlignVertical: "top" },
+  row: { flexDirection: "row", gap: 10 },
+  half: { flex: 1, justifyContent: "center" },
+  selectInput: { borderWidth: 1, borderColor: "#E2E8F0", borderRadius: 14, padding: 14, backgroundColor: "#F8FAFC" },
+  friendBox: { borderWidth: 1, borderColor: "#E2E8F0", borderRadius: 14, maxHeight: 150, marginTop: 8 },
+  friendRow: { flexDirection: "row", padding: 12, borderBottomWidth: 1, borderBottomColor: "#F1F5F9", alignItems: "center" },
+  friendSelected: { backgroundColor: "#F0F2FF" },
+  actions: { flexDirection: "row", gap: 12, marginTop: 25 },
+  cancelBtn: { flex: 1, padding: 16, alignItems: "center", borderRadius: 16, backgroundColor: "#F8FAFC", borderWidth: 1, borderColor: "#E2E8F0" },
+  createBtn: { flex: 1.5, padding: 16, alignItems: "center", borderRadius: 16, backgroundColor: "#505BEB" },
+  pickerWrapper: { backgroundColor: "#F1F5F9", borderRadius: 16, marginTop: 10, overflow: "hidden" },
+  iosToolbar: { flexDirection: "row", justifyContent: "space-between", padding: 15, borderBottomWidth: 1, borderBottomColor: "#E2E8F0", backgroundColor: "#FFF" },
 });
