@@ -6,7 +6,7 @@ import {SafeAreaView} from "react-native-safe-area-context";
 import * as Haptics from 'expo-haptics';
 import {Ionicons, MaterialCommunityIcons} from "@expo/vector-icons";
 import {getAuth} from "firebase/auth";
-import {collection, query, orderBy, onSnapshot, getDoc, doc} from "firebase/firestore";
+import {collection, query, orderBy, onSnapshot, getDoc, doc, where, limit} from "firebase/firestore";
 import {auth, db} from "../../FirebaseConfig";
 import {useNavigation} from "@react-navigation/native";
 import {useBottomTabBarHeight} from '@react-navigation/bottom-tabs';
@@ -35,18 +35,14 @@ const COLORS = {
 export default function HomeScreen() {
     const tabBarHeight = useBottomTabBarHeight();
     const navigation = useNavigation<any>();
-
-    // ✅ Змінюємо на state замість константи
     const [uid, setUid] = useState<string>("");
-
     const [activeTab, setActiveTab] = useState<"Upcoming" | "Invitings" | "My Events">("Upcoming");
-    const [isModalVisible, setModalVisible] = useState(false);
     const [events, setEvents] = useState<EventFull[]>([]);
     const [username, setUsername] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [isAdmin, setIsAdmin] = useState(false);
+    const [hasUnreadChats, setHasUnreadChats] = useState(false);
 
-    // ✅ Додаємо useEffect для відстеженняAuth state
     useEffect(() => {
         const unsubscribe = auth.onAuthStateChanged((user) => {
             if (user) {
@@ -69,52 +65,47 @@ export default function HomeScreen() {
             }
         };
         checkRole();
-    }, [uid]); // ✅ Додаємо залежність від uid
+    }, [uid]);
 
-    // Завантажуємо ім'я юзера
+    // Завантажуємо ім'я юзера в реальному часі
     useEffect(() => {
-        // ✅ Перевіряємо, чи uid не порожній
         if (!uid) return;
-
-        const loadUser = async () => {
-            console.log("Loading username for uid:", uid); // Для діагностики
-
-            const name = await fetchUsername();
-            console.log("Fetched username:", name); // Для діагностики
-
-            if (name) {
-                setUsername(name);
+        const userRef = doc(db, "users", uid);
+        const unsubscribeUser = onSnapshot(userRef, async (snap) => {
+            if (snap.exists()) {
+                const data = snap.data();
+                if (data.username) {
+                    setUsername(data.username);
+                }
             } else {
-                // Fallback: беремо з AsyncStorage
                 const pendingName = await AsyncStorage.getItem("pendingUsername");
-                console.log("Pending username:", pendingName); // Для діагностики
-
                 if (pendingName) {
                     setUsername(pendingName);
                     await AsyncStorage.removeItem("pendingUsername");
                 }
             }
+        }, (error) => {
+            console.error("🔴 [HomeScreen] User snapshot error:", error);
+        });
 
-            // РЕЄСТРАЦІЯ ТОКЕНА
-            registerForPushNotificationsAsync(uid);
-        };
+        // Реєстрація токена для пушів
+        registerForPushNotificationsAsync(uid);
 
-        loadUser();
-    }, [uid]); // ✅ Тепер залежить від uid state
-
+        // Обов'язково відписуємось від слухача, коли компонент розмонтовується чи змінюється uid
+        return () => unsubscribeUser();
+    }, [uid]);
 
     // Слухаємо базу даних в реальному часі
     useEffect(() => {
         setLoading(true);
         const q = query(collection(db, "events"), orderBy("createdAt", "desc"));
-
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const data = snapshot.docs.map(doc => ({
                 id: doc.id,
                 ...doc.data()
             } as EventFull));
             setEvents(data);
-            setLoading(false); // Вимикаємо завантаження після отримання даних
+            setLoading(false);
         }, (error) => {
             console.error("Firestore error:", error);
             setLoading(false);
@@ -122,6 +113,92 @@ export default function HomeScreen() {
 
         return () => unsubscribe();
     }, []);
+    useEffect(() => {
+        if (!uid) return;
+
+        const qOwner = query(collection(db, "events"), where("userId", "==", uid));
+        const qAccepted = query(collection(db, "events"), where("acceptedUserIds", "array-contains", uid));
+        const eventMap = new Map<string, any>();
+        const statusUnsubs = new Map<string, () => void>();
+        const activeEventIds = new Set<string>();
+        const checkUnread = (eventId: string, lastMsgData: any, lastReadMs: number) => {
+            if (!lastMsgData || lastMsgData.userId === uid) {
+                eventMap.set(eventId, false);
+            } else {
+                const createdMs =
+                    lastMsgData.createdAt?.toMillis?.() ??
+                    new Date(lastMsgData.createdAt).getTime();
+                eventMap.set(eventId, createdMs > lastReadMs);
+            }
+
+            const newValue = Array.from(eventMap.values()).some(Boolean);
+            setHasUnreadChats(prev => prev === newValue ? prev : newValue);
+        };
+        const subscribeToEvent = (eventId: string) => {
+            if (statusUnsubs.has(eventId)) return;
+
+            const messagesRef = collection(db, "events", eventId, "messages");
+            const qMsgs = query(messagesRef, orderBy("createdAt", "desc"), limit(1));
+            const statusRef = doc(db, "users", uid, "chatStatus", eventId);
+
+            let lastMsgData: any = null;
+            let lastReadMs = 0;
+            let msgLoaded = false;
+            let statusLoaded = false;
+
+            const unsubMsg = onSnapshot(qMsgs, (snap) => {
+                lastMsgData = snap.docs[0]?.data() ?? null;
+                msgLoaded = true;
+                if (statusLoaded) checkUnread(eventId, lastMsgData, lastReadMs);
+            });
+
+            const unsubStatus = onSnapshot(statusRef, (snap) => {
+                lastReadMs = snap.exists() ? (snap.data().lastRead?.toMillis?.() ?? 0) : 0;
+                statusLoaded = true;
+                if (msgLoaded) checkUnread(eventId, lastMsgData, lastReadMs);
+            });
+
+            statusUnsubs.set(eventId, () => { unsubMsg(); unsubStatus(); });
+        };
+
+        // Відписуємось від івентів, яких більше немає
+        const cleanupStaleEvents = () => {
+            statusUnsubs.forEach((unsub, eventId) => {
+                if (!activeEventIds.has(eventId)) {
+                    unsub();
+                    statusUnsubs.delete(eventId);
+                    eventMap.delete(eventId);
+                }
+            });
+            setHasUnreadChats(Array.from(eventMap.values()).some(Boolean));
+        };
+
+        const updateActiveEvents = (ownerIds: string[], acceptedIds: string[]) => {
+            activeEventIds.clear();
+            [...ownerIds, ...acceptedIds].forEach(id => activeEventIds.add(id));
+            cleanupStaleEvents();
+            activeEventIds.forEach(id => subscribeToEvent(id));
+        };
+
+        let ownerIds: string[] = [];
+        let acceptedIds: string[] = [];
+
+        const unsubOwner = onSnapshot(qOwner, (snap) => {
+            ownerIds = snap.docs.map(d => d.id);
+            updateActiveEvents(ownerIds, acceptedIds);
+        });
+
+        const unsubAccepted = onSnapshot(qAccepted, (snap) => {
+            acceptedIds = snap.docs.map(d => d.id);
+            updateActiveEvents(ownerIds, acceptedIds);
+        });
+
+        return () => {
+            unsubOwner();
+            unsubAccepted();
+            statusUnsubs.forEach(fn => fn());
+        };
+    }, [uid]);
 
     // Фільтрація подій
     const visibleEvents = useMemo(() => {
@@ -158,9 +235,13 @@ export default function HomeScreen() {
     const handleAcceptInvite = async (item: EventFull) => {
         try {
             await acceptInvite(item.id);
-            // 2. Ставимо локальне нагадування на телефон
-            await scheduleEventReminder(item.name, item.date);
-
+            // Ставимо локальне нагадування на телефон
+            if (item.eventDateTime) {
+                await scheduleEventReminder({
+                    eventTitle: item.name,
+                    eventDate: item.eventDateTime,
+                });
+            }
             if (Platform.OS === 'ios') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         } catch (e) {
             console.error("Error accepting invite:", e);
@@ -184,13 +265,25 @@ export default function HomeScreen() {
                                     <Text style={styles.greeting}>{username ? `Hi, ${username}!` : "Welcome!"}</Text>
                                     <Text style={styles.subGreeting}>Ready to make memories?</Text>
                                 </View>
-                                <TouchableOpacity style={styles.chatIconBtn}
-                                                  onPress={() => navigation.navigate("Chats")}>
-                                    <Ionicons name="chatbubble-ellipses" size={24} color={COLORS.accent}/>
+                                <TouchableOpacity style={styles.chatIconBtn} onPress={() => navigation.navigate("Chats")}>
+                                    <Ionicons name="chatbubble-ellipses" size={24} color={COLORS.accent} />
+                                    {hasUnreadChats && (
+                                        <View style={{
+                                            position: "absolute",
+                                            top: 8,
+                                            right: 8,
+                                            width: 10,
+                                            height: 10,
+                                            borderRadius: 5,
+                                            backgroundColor: COLORS.error,
+                                            borderWidth: 2,
+                                            borderColor: COLORS.white,
+                                        }} />
+                                    )}
                                 </TouchableOpacity>
                             </View>
 
-                            {/* Картка події на сьогодні (ховаємо під час завантаження для чистоти) */}
+                            {/* Картка події на сьогодні */}
                             {!loading && (
                                 <View style={styles.todayCard}>
                                     <View style={styles.todayHeader}>
@@ -271,27 +364,13 @@ export default function HomeScreen() {
                                     item={item}
                                     uid={uid}
                                     onOpenChat={openChat}
-                                    onAccept={() => handleAcceptInvite(item)} // Ось тут зміна
+                                    onAccept={() => handleAcceptInvite(item)}
                                     onDecline={declineInvite}
                                 />
                             </View>
                         )
                     )}
                 />
-
-                {/* FAB */}
-                {/*<TouchableOpacity*/}
-                {/*    activeOpacity={0.8}*/}
-                {/*    style={[styles.fab, {bottom: tabBarHeight + 24}]}*/}
-                {/*    onPress={() => {*/}
-                {/*        if (Platform.OS === "ios") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);*/}
-                {/*        setModalVisible(true);*/}
-                {/*    }}*/}
-                {/*>*/}
-                {/*    <Ionicons name="add" size={32} color="#FFF"/>*/}
-                {/*</TouchableOpacity>*/}
-
-                {/*<CreateEventModal visible={isModalVisible} closeModal={() => setModalVisible(false)}/>*/}
             </View>
         </SafeAreaView>
     );

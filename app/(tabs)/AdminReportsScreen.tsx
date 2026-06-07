@@ -1,41 +1,13 @@
 import React, { useEffect, useState } from "react";
-import {
-    View,
-    Text,
-    StyleSheet,
-    FlatList,
-    TouchableOpacity,
-    ActivityIndicator,
-    Alert,
-    Platform,
+import {View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert, Platform,
 } from "react-native";
 import { Ionicons, Feather } from "@expo/vector-icons";
-import {
-    collection,
-    doc,
-    onSnapshot,
-    orderBy,
-    query,
-    updateDoc,
-    getDoc,
+import {collection, doc, onSnapshot, orderBy, query, updateDoc, getDoc,
 } from "firebase/firestore";
 import { db } from "../../FirebaseConfig";
 import { useNavigation } from "@react-navigation/native";
 
-type Report = {
-    id: string;
-    type: "event" | "message" | "user";
-    targetId: string;
-    eventId?: string;
-    messageId?: string;
-    reportedUserId?: string;
-    reporterId: string;
-    reporters?: string[];
-    reasons: string[];
-    details?: string;
-    status: "open" | "reviewed" | "dismissed" | "resolved";
-    createdAt?: any;
-};
+import {Report} from "@/utils/types";
 
 const COLORS = {
     primary: "#505BEB",

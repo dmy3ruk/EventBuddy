@@ -19,9 +19,40 @@ export interface EventType {
     acceptedUserIds?: string[];
     location?: EventLocation | null;
     createdAt?: string;
+    organizerId?: string;
+    eventDateTime?: Date; // ← додано
 }
 
-// 3. Повна модель події (З обов'язковим ID)
+// Повна модель події (З обов'язковим ID)
 export interface EventFull extends EventType {
     id: string;
 }
+
+export type Report = {
+    id: string;
+    type: "event" | "message" | "user";
+    targetId: string;
+    eventId?: string;
+    messageId?: string;
+    reportedUserId?: string;
+    reporterId: string;
+    reporters?: string[];
+    reasons: string[];
+    details?: string;
+    status: "open" | "reviewed" | "dismissed" | "resolved";
+    createdAt?: any;
+};
+
+
+
+export type UserItem = { uid: string; username: string; avatarUrl?: string | null };
+export type FriendItem = { uid: string; username: string; avatarUrl?: string | null };
+export type FriendRequest = {
+    id: string;
+    fromUid: string;
+    fromUsername: string;
+    fromAvatarUrl?: string | null;
+    toUid: string;
+    toUsername: string;
+};
+export type TabType = "Search" | "Requests" | "My friends";

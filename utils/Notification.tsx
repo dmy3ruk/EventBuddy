@@ -33,9 +33,7 @@ export async function registerForPushNotificationsAsync(uid: string) {
             });
         }
 
-        const { status: existingStatus } =
-            await Notifications.getPermissionsAsync();
-
+        const { status: existingStatus } = await Notifications.getPermissionsAsync();
         let finalStatus = existingStatus;
 
         if (existingStatus !== "granted") {
@@ -53,10 +51,7 @@ export async function registerForPushNotificationsAsync(uid: string) {
             Constants.easConfig?.projectId ||
             "643f517e-fd55-4c5d-93d7-101c7580e791";
 
-        const tokenResponse = await Notifications.getExpoPushTokenAsync({
-            projectId,
-        });
-
+        const tokenResponse = await Notifications.getExpoPushTokenAsync({ projectId });
         const token = tokenResponse.data;
 
         await setDoc(
@@ -69,7 +64,6 @@ export async function registerForPushNotificationsAsync(uid: string) {
         );
 
         console.log("Expo push token saved:", token);
-
         return token;
     } catch (error) {
         console.log("Push notification registration error:", error);
@@ -105,9 +99,7 @@ export const sendPushNotification = async (
         });
 
         const data = await response.json();
-
         console.log("Expo push response:", data);
-
         return data;
     } catch (error) {
         console.log("Send push notification error:", error);
@@ -122,7 +114,7 @@ export const scheduleEventReminder = async ({
                                                 eventNotifications = true,
                                             }: {
     eventTitle: string;
-    eventDate: string;
+    eventDate: Date;
     reminderMinutes?: number;
     eventNotifications?: boolean;
 }) => {
@@ -141,9 +133,7 @@ export const scheduleEventReminder = async ({
             }),
         });
 
-        const { status: existingStatus } =
-            await Notifications.getPermissionsAsync();
-
+        const { status: existingStatus } = await Notifications.getPermissionsAsync();
         let finalStatus = existingStatus;
 
         if (existingStatus !== "granted") {
@@ -151,10 +141,7 @@ export const scheduleEventReminder = async ({
             finalStatus = status;
         }
 
-        if (finalStatus !== "granted") {
-            console.log("Notification permission not granted.");
-            return null;
-        }
+        if (finalStatus !== "granted") return null;
 
         if (Platform.OS === "android") {
             await Notifications.setNotificationChannelAsync("event-reminders", {
@@ -165,19 +152,15 @@ export const scheduleEventReminder = async ({
             });
         }
 
-        const eventStartDate = new Date(eventDate);
-
-        if (isNaN(eventStartDate.getTime())) {
-            console.log("Invalid event date:", eventDate);
-            return null;
-        }
-
         const triggerDate = new Date(
-            eventStartDate.getTime() - reminderMinutes * 60 * 1000
+            eventDate.getTime() - reminderMinutes * 60 * 1000
         );
 
-        if (triggerDate <= new Date()) {
-            console.log("Reminder time is already in the past.");
+        // ✅ Мінімум 5 хвилин у майбутньому
+        const MIN_DELAY_MS = 5 * 60 * 1000;
+
+        if (triggerDate.getTime() - Date.now() < MIN_DELAY_MS) {
+            console.log("Reminder too soon or in the past, skipping");
             return null;
         }
 
@@ -199,13 +182,13 @@ export const scheduleEventReminder = async ({
                 sound: "default",
             },
             trigger: {
+                type: "date",
                 date: triggerDate,
                 channelId: "event-reminders",
             } as any,
         });
 
         console.log("Scheduled notification:", notificationId);
-
         return notificationId;
     } catch (error) {
         console.log("Schedule reminder error:", error);

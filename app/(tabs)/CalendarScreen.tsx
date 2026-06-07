@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, StatusBar,
-    Platform, LayoutAnimation } from "react-native";
+    LayoutAnimation } from "react-native";
 import { Calendar } from "react-native-calendars";
 import { getAuth } from "firebase/auth";
 import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
 import { db } from "../../FirebaseConfig";
 import { EventFull } from "../../utils/types";
-import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from 'expo-haptics';
@@ -33,7 +33,7 @@ export default function CalendarScreen() {
 
     const uid = getAuth().currentUser?.uid;
 
-    // Слухаємо зміни в Firestore та групуємо події за датами
+    // Слухаємо зміни в Firestore
     useEffect(() => {
         if (!uid) return;
         const q = query(collection(db, "events"), orderBy("time", "asc"));
@@ -42,7 +42,6 @@ export default function CalendarScreen() {
 
             snapshot.docs.forEach((docSnap) => {
                 const data = docSnap.data() as EventFull;
-                // Фільтруємо події, де користувач є автором або учасником
                 if (data.userId === uid || (data.acceptedUserIds || []).includes(uid)) {
                     const date = data.date;
                     if (!grouped[date]) grouped[date] = [];
@@ -56,7 +55,7 @@ export default function CalendarScreen() {
         return () => unsubscribe();
     }, [uid]);
 
-    // Формуємо об'єкт маркування для календаря
+    // Маркування дат для календаря
     const markedDates = useMemo(() => {
         const marks: any = {};
         Object.keys(eventsByDate).forEach((date) => {
@@ -85,7 +84,7 @@ export default function CalendarScreen() {
         <View style={[styles.container, { paddingTop: insets.top }]}>
             <StatusBar barStyle="dark-content" />
 
-            {/* Header*/}
+            {/* Header */}
             <View style={styles.header}>
                 <View style={styles.headerLeft}>
                     <TouchableOpacity style={styles.backBtn} onPress={handleBack}>
@@ -109,6 +108,7 @@ export default function CalendarScreen() {
                 keyExtractor={(item) => item.id}
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 100 }]}
+                ItemSeparatorComponent={() => <View style={styles.separator} />}
                 ListHeaderComponent={
                     <View style={styles.topSection}>
                         {/* Картка календаря */}
@@ -153,16 +153,7 @@ export default function CalendarScreen() {
                     </View>
                 }
                 renderItem={({ item }) => (
-                    <View style={styles.timelineRow}>
-                        {/* Таймлайн */}
-                        <View style={styles.timelineSidebar}>
-                            <View style={styles.dot} />
-                            <View style={styles.line} />
-                        </View>
-                        <View style={styles.cardWrapper}>
-                            <EventCard item={item} uid={uid || ""} mode="discover" />
-                        </View>
-                    </View>
+                    <EventCard item={item} uid={uid || ""} mode="discover" />
                 )}
                 ListEmptyComponent={
                     <View style={styles.emptyState}>
@@ -175,7 +166,7 @@ export default function CalendarScreen() {
                 }
             />
 
-            {/* CTA */}
+            {/* CTA Кнопка */}
             <TouchableOpacity
                 activeOpacity={0.9}
                 style={[styles.fab, { bottom: insets.bottom + 20 }]}
@@ -188,7 +179,7 @@ export default function CalendarScreen() {
                 <Text style={styles.fabText}>New Event</Text>
             </TouchableOpacity>
 
-            {/* Модалка створення події з прокиданням обраної дати */}
+            {/* Модалка створення події */}
             <CreateEventModal
                 visible={isModalVisible}
                 closeModal={() => setModalVisible(false)}
@@ -212,7 +203,6 @@ const styles = StyleSheet.create({
     headerTextContainer: { justifyContent: 'center' },
     headerLabel: { fontSize: 10, fontWeight: '800', color: COLORS.primary, letterSpacing: 1 },
     headerTitle: { fontSize: 28, fontWeight: '800', color: COLORS.textMain, marginTop: -4 },
-
     todayBtn: {
         backgroundColor: COLORS.white,
         paddingHorizontal: 12,
@@ -222,8 +212,8 @@ const styles = StyleSheet.create({
         borderColor: COLORS.border,
     },
     todayBtnText: { fontSize: 13, fontWeight: '700', color: COLORS.primary },
-
-    topSection: { paddingHorizontal: 16 },
+    listContent: { paddingHorizontal: 16 },
+    topSection: { paddingHorizontal: 0 },
     calendarCard: {
         backgroundColor: COLORS.white,
         borderRadius: 24,
@@ -235,9 +225,10 @@ const styles = StyleSheet.create({
         shadowRadius: 12,
         elevation: 3,
     },
-
-    listContent: { paddingHorizontal: 16 },
-    listHeader: { marginBottom: 20, paddingLeft: 34 },
+    listHeader: {
+        marginBottom: 20,
+        paddingLeft: 0,
+    },
     titleRow: { flexDirection: 'row', alignItems: 'center' },
     sectionTitle: { fontSize: 18, fontWeight: '800', color: COLORS.textMain },
     dateSub: { fontSize: 13, color: COLORS.textMuted, marginTop: 2, fontWeight: '500' },
@@ -251,26 +242,9 @@ const styles = StyleSheet.create({
         marginLeft: 8,
     },
     badgeText: { color: COLORS.white, fontSize: 11, fontWeight: '800' },
-
-    timelineRow: { flexDirection: 'row', marginBottom: 12 },
-    timelineSidebar: { width: 34, alignItems: 'center' },
-    dot: {
-        width: 10,
-        height: 10,
-        borderRadius: 5,
-        backgroundColor: COLORS.primary,
-        marginTop: 24,
-        zIndex: 2
+    separator: {
+        height: 12,
     },
-    line: {
-        position: 'absolute',
-        top: 34,
-        bottom: -12,
-        width: 2,
-        backgroundColor: COLORS.border,
-        zIndex: 1
-    },
-    cardWrapper: { flex: 1 },
 
     emptyState: { alignItems: 'center', marginTop: 40, paddingHorizontal: 40 },
     emptyIconCircle: {
